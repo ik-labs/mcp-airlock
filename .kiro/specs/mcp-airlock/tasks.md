@@ -7,8 +7,8 @@
   - Implement structured logging with zap and basic health check endpoints
   - _Requirements: R7.1, R5.2, R16.1, R16.5_
 
-- [ ] 2. MCP Go-SDK integration foundation
-- [ ] 2.1 Create basic MCP server wrapper with Go concurrency patterns
+- [-] 2. MCP Go-SDK integration foundation
+- [x] 2.1 Create basic MCP server wrapper with Go concurrency patterns
   - Implement AirlockServer with one goroutine per client connection and bounded channels
   - Create HTTP/SSE transport with proper timeouts, heartbeat, and http.Flusher
   - Add context propagation for cancellation and correlation ID generation
