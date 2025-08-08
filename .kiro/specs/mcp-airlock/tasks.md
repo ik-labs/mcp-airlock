@@ -15,7 +15,7 @@
   - Write unit tests with httptest and race detection enabled
   - _Requirements: R16.1, R16.2, R16.3, R9.1_
 
-- [ ] 2.2 Implement MCP client connector for upstream servers
+- [x] 2.2 Implement MCP client connector for upstream servers
   - Create UpstreamConnector using go-sdk Client for stdio/Unix socket connections
   - Implement client pool management with connection lifecycle handling
   - Add basic request proxying from server to upstream clients

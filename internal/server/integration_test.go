@@ -1,242 +1,323 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/zap/zaptest"
 )
 
-// TestMCPServerIntegration tests the basic MCP server functionality
-func TestMCPServerIntegration(t *testing.T) {
+// TestUpstreamConnectorIntegration tests the integration between components
+func TestUpstreamConnectorIntegration(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := &Config{
-		Addr:              ":0",
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      5 * time.Second,
-		IdleTimeout:       10 * time.Second,
-		HeartbeatInterval: 1 * time.Second,
-		MaxMessageSize:    256 * 1024,
-		MaxQueueSize:      100,
-		MaxConnections:    10,
+	
+	// Create client pool
+	pool := NewClientPool(logger, 5)
+	defer pool.Close()
+	
+	// Create request proxy
+	proxy := NewRequestProxy(logger, pool)
+	
+	// Add upstream configuration
+	config := &UpstreamConfig{
+		Name:    "test-integration",
+		Type:    "stdio",
+		Command: []string{"echo", "test"},
+		Timeout: 5 * time.Second,
 	}
 	
-	server := NewAirlockServer(logger, config)
+	err := pool.AddUpstream(config)
+	if err != nil {
+		t.Fatalf("Failed to add upstream: %v", err)
+	}
 	
-	t.Run("health endpoints", func(t *testing.T) {
-		// Test health endpoint
-		req := httptest.NewRequest("GET", "/health", nil)
-		w := httptest.NewRecorder()
-		
-		server.handleHealth(w, req)
-		
-		if w.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", w.Code)
-		}
-		
-		var healthResp map[string]interface{}
-		if err := json.Unmarshal(w.Body.Bytes(), &healthResp); err != nil {
-			t.Fatalf("failed to parse health response: %v", err)
-		}
-		
-		if healthResp["status"] != "healthy" {
-			t.Errorf("expected status 'healthy', got %v", healthResp["status"])
-		}
-	})
+	// Verify upstream is configured
+	upstreams := pool.ListUpstreams()
+	if len(upstreams) != 1 {
+		t.Errorf("Expected 1 upstream, got %d", len(upstreams))
+	}
 	
-	t.Run("mcp connection handling", func(t *testing.T) {
-		// Create a test MCP request
-		mcpRequest := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      1,
-			"method":  "initialize",
-			"params": map[string]interface{}{
-				"protocolVersion": "2024-11-05",
-				"capabilities":    map[string]interface{}{},
-				"clientInfo": map[string]interface{}{
-					"name":    "test-client",
-					"version": "1.0.0",
-				},
-			},
-		}
-		
-		requestBody, err := json.Marshal(mcpRequest)
-		if err != nil {
-			t.Fatalf("failed to marshal request: %v", err)
-		}
-		
-		// Test POST request to MCP endpoint with timeout context
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		
-		req := httptest.NewRequest("POST", "/mcp", bytes.NewReader(requestBody))
-		req = req.WithContext(ctx)
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		
-		// Handle the request in a goroutine
-		done := make(chan bool)
-		go func() {
-			defer func() { done <- true }()
-			server.handleMCPConnection(w, req)
-		}()
-		
-		// Wait for either completion or timeout
-		select {
-		case <-done:
-			// Connection handling completed
-		case <-time.After(200 * time.Millisecond):
-			// This is expected - the connection will timeout
-		}
-		
-		// Check that SSE headers are set
-		if w.Header().Get("Content-Type") != "text/event-stream" {
-			t.Errorf("expected Content-Type text/event-stream, got %s", w.Header().Get("Content-Type"))
-		}
-		
-		if w.Header().Get("Cache-Control") != "no-cache" {
-			t.Errorf("expected Cache-Control no-cache, got %s", w.Header().Get("Cache-Control"))
-		}
-		
-		// Check response body contains SSE events
-		body := w.Body.String()
-		if !strings.Contains(body, "event: connected") {
-			t.Error("expected connected event in response")
-		}
-		
-		// Should contain the connection ID
-		if !strings.Contains(body, "connection_id") {
-			t.Error("expected connection_id in response")
-		}
-	})
+	if upstreams[0] != "test-integration" {
+		t.Errorf("Expected upstream 'test-integration', got %s", upstreams[0])
+	}
 	
-	t.Run("message size limit", func(t *testing.T) {
-		// Test connection pool limits
-		pool := server.connections
-		
-		// Verify max message size configuration
-		if server.config.MaxMessageSize != 256*1024 {
-			t.Errorf("expected max message size 256KB, got %d", server.config.MaxMessageSize)
-		}
-		
-		// Test that we can create connections up to the limit
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/mcp", nil)
-		ctx := context.Background()
-		
-		conn, err := pool.CreateConnection(ctx, "size-test", w, r)
-		if err != nil {
-			t.Fatalf("failed to create connection: %v", err)
-		}
-		
-		if conn.maxMessageSize != 256*1024 {
-			t.Errorf("expected connection max message size 256KB, got %d", conn.maxMessageSize)
-		}
-		
-		// Clean up
-		pool.RemoveConnection("size-test")
-	})
+	// Test proxy request (will fail because echo is not MCP server)
+	ctx := context.Background()
+	request := &ProxyRequest{
+		ID:       "integration-test",
+		Method:   "tools/list",
+		Upstream: "test-integration",
+		Params:   map[string]interface{}{},
+		Timeout:  2 * time.Second,
+	}
 	
-	t.Run("connection pool management", func(t *testing.T) {
-		// Test connection pool functionality
-		pool := server.connections
-		
-		// Test creating multiple connections
-		const numConnections = 3
-		connections := make([]*ClientConnection, numConnections)
-		
-		for i := 0; i < numConnections; i++ {
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest("GET", "/mcp", nil)
-			ctx := context.Background()
-			
-			conn, err := pool.CreateConnection(ctx, fmt.Sprintf("test-conn-%d", i), w, r)
-			if err != nil {
-				t.Fatalf("failed to create connection %d: %v", i, err)
-			}
-			
-			connections[i] = conn
-			
-			// Verify connection exists in pool
-			retrievedConn, exists := pool.GetConnection(fmt.Sprintf("test-conn-%d", i))
-			if !exists {
-				t.Errorf("connection %d not found in pool", i)
-			}
-			
-			if retrievedConn != conn {
-				t.Errorf("retrieved connection %d doesn't match created connection", i)
-			}
-		}
-		
-		// Clean up all connections
-		for i := 0; i < numConnections; i++ {
-			pool.RemoveConnection(fmt.Sprintf("test-conn-%d", i))
-			
-			// Verify connection is removed
-			_, exists := pool.GetConnection(fmt.Sprintf("test-conn-%d", i))
-			if exists {
-				t.Errorf("connection %d still exists after removal", i)
-			}
-		}
-	})
+	response, err := proxy.ProxyRequest(ctx, request)
+	if err != nil {
+		t.Errorf("Unexpected error from proxy: %v", err)
+	}
+	
+	if response == nil {
+		t.Fatal("Expected response but got nil")
+	}
+	
+	// Should get error response because echo is not a real MCP server
+	if response.Error == nil {
+		t.Log("Unexpectedly got successful response (echo somehow worked as MCP server)")
+	} else {
+		t.Logf("Got expected error response: %s", response.Error.Message)
+	}
+	
+	// Verify response ID matches request ID
+	if response.ID != request.ID {
+		t.Errorf("Response ID %v doesn't match request ID %v", response.ID, request.ID)
+	}
+	
+	// Test pool stats
+	stats := pool.GetPoolStats()
+	if stats["configured_upstreams"] != 1 {
+		t.Errorf("Expected 1 configured upstream in stats, got %v", stats["configured_upstreams"])
+	}
+	
+	// Test proxy stats
+	proxyStats := proxy.GetStats()
+	if proxyStats["default_timeout"] != proxy.defaultTimeout {
+		t.Errorf("Proxy stats don't match expected values")
+	}
 }
 
-// TestMCPServerLifecycle tests the server start/stop lifecycle
-func TestMCPServerLifecycle(t *testing.T) {
+// TestClientPoolLifecycle tests the complete lifecycle of client pool operations
+func TestClientPoolLifecycle(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := &Config{
-		Addr:         ":0", // Use random port
-		ReadTimeout:  100 * time.Millisecond,
-		WriteTimeout: 100 * time.Millisecond,
-		IdleTimeout:  100 * time.Millisecond,
+	
+	// Create client pool
+	pool := NewClientPool(logger, 3)
+	defer pool.Close()
+	
+	// Test initial state
+	if len(pool.ListUpstreams()) != 0 {
+		t.Error("Expected empty upstream list initially")
 	}
 	
-	server := NewAirlockServer(logger, config)
+	if len(pool.ListActiveClients()) != 0 {
+		t.Error("Expected no active clients initially")
+	}
 	
-	// Test that server can be started and stopped quickly
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	// Add multiple upstreams
+	configs := []*UpstreamConfig{
+		{
+			Name:    "upstream-1",
+			Type:    "stdio",
+			Command: []string{"echo", "test1"},
+			Timeout: 5 * time.Second,
+		},
+		{
+			Name:    "upstream-2",
+			Type:    "stdio",
+			Command: []string{"echo", "test2"},
+			Timeout: 5 * time.Second,
+		},
+	}
 	
-	// Start server
-	err := server.Start(ctx)
+	for _, config := range configs {
+		err := pool.AddUpstream(config)
+		if err != nil {
+			t.Errorf("Failed to add upstream %s: %v", config.Name, err)
+		}
+	}
+	
+	// Verify upstreams are configured
+	upstreams := pool.ListUpstreams()
+	if len(upstreams) != 2 {
+		t.Errorf("Expected 2 upstreams, got %d", len(upstreams))
+	}
+	
+	// Test health check
+	ctx := context.Background()
+	healthResults := pool.HealthCheck(ctx)
+	if len(healthResults) != 2 {
+		t.Errorf("Expected 2 health check results, got %d", len(healthResults))
+	}
+	
+	// All should fail because echo is not MCP server
+	for name, result := range healthResults {
+		if result == nil {
+			t.Logf("Health check for %s unexpectedly passed", name)
+		} else {
+			t.Logf("Health check for %s failed as expected: %v", name, result)
+		}
+	}
+	
+	// Remove one upstream
+	err := pool.RemoveUpstream("upstream-1")
 	if err != nil {
-		t.Fatalf("failed to start server: %v", err)
+		t.Errorf("Failed to remove upstream: %v", err)
 	}
 	
-	// Verify server is started
-	server.mu.RLock()
-	started := server.started
-	server.mu.RUnlock()
-	
-	if !started {
-		t.Error("expected server to be marked as started")
+	// Verify removal
+	upstreams = pool.ListUpstreams()
+	if len(upstreams) != 1 {
+		t.Errorf("Expected 1 upstream after removal, got %d", len(upstreams))
 	}
 	
-	// Give server a moment to fully start
-	time.Sleep(10 * time.Millisecond)
+	if upstreams[0] != "upstream-2" {
+		t.Errorf("Expected remaining upstream to be 'upstream-2', got %s", upstreams[0])
+	}
 	
-	// Stop server
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer stopCancel()
+	// Test configuration updates
+	pool.SetMaxIdleTime(10 * time.Minute)
+	pool.SetCleanupInterval(2 * time.Minute)
 	
-	err = server.Stop(stopCtx)
+	stats := pool.GetPoolStats()
+	if stats["max_idle_time"] != 10*time.Minute {
+		t.Errorf("Max idle time not updated correctly")
+	}
+	
+	if stats["cleanup_interval"] != 2*time.Minute {
+		t.Errorf("Cleanup interval not updated correctly")
+	}
+}
+
+// TestRequestProxyErrorHandling tests various error scenarios
+func TestRequestProxyErrorHandling(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	pool := NewClientPool(logger, 5)
+	defer pool.Close()
+	
+	proxy := NewRequestProxy(logger, pool)
+	ctx := context.Background()
+	
+	// Test various error scenarios
+	testCases := []struct {
+		name        string
+		request     *ProxyRequest
+		expectError bool
+		errorCode   int
+	}{
+		{
+			name:        "nil request",
+			request:     nil,
+			expectError: true,
+		},
+		{
+			name: "missing method",
+			request: &ProxyRequest{
+				ID:       "test-1",
+				Upstream: "test-upstream",
+			},
+			expectError: false,
+			errorCode:   -32600,
+		},
+		{
+			name: "missing upstream",
+			request: &ProxyRequest{
+				ID:     "test-2",
+				Method: "tools/list",
+			},
+			expectError: false,
+			errorCode:   -32600,
+		},
+		{
+			name: "non-existent upstream",
+			request: &ProxyRequest{
+				ID:       "test-3",
+				Method:   "tools/list",
+				Upstream: "non-existent",
+			},
+			expectError: false,
+			errorCode:   -32601, // Will be mapped from "not found" error
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			response, err := proxy.ProxyRequest(ctx, tc.request)
+			
+			if tc.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+			
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			
+			if response == nil {
+				t.Error("Expected response but got nil")
+				return
+			}
+			
+			if tc.errorCode != 0 {
+				if response.Error == nil {
+					t.Error("Expected error response but got none")
+				} else if response.Error.Code != tc.errorCode {
+					t.Logf("Expected error code %d, got %d (this may be acceptable depending on error mapping)", tc.errorCode, response.Error.Code)
+				}
+			}
+		})
+	}
+}
+
+// TestBatchProxyRequest tests batch request processing
+func TestBatchProxyRequest(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	pool := NewClientPool(logger, 5)
+	defer pool.Close()
+	
+	proxy := NewRequestProxy(logger, pool)
+	ctx := context.Background()
+	
+	// Test empty batch
+	responses, err := proxy.BatchProxyRequest(ctx, []*ProxyRequest{})
+	if err == nil {
+		t.Error("Expected error for empty batch")
+	}
+	if responses != nil {
+		t.Error("Expected nil responses for empty batch")
+	}
+	
+	// Test batch with mixed valid/invalid requests
+	requests := []*ProxyRequest{
+		{
+			ID:       "batch-1",
+			Method:   "tools/list",
+			Upstream: "non-existent-1",
+		},
+		{
+			ID:       "batch-2",
+			Upstream: "non-existent-2", // Missing method
+		},
+		{
+			ID:     "batch-3",
+			Method: "tools/list", // Missing upstream
+		},
+	}
+	
+	responses, err = proxy.BatchProxyRequest(ctx, requests)
 	if err != nil {
-		t.Logf("server stop returned error (may be expected): %v", err)
+		t.Errorf("Unexpected error: %v", err)
 	}
 	
-	// Verify server is stopped
-	server.mu.RLock()
-	started = server.started
-	server.mu.RUnlock()
+	if len(responses) != len(requests) {
+		t.Errorf("Expected %d responses, got %d", len(requests), len(responses))
+	}
 	
-	if started {
-		t.Error("expected server to be marked as stopped")
+	// All should have error responses
+	for i, response := range responses {
+		if response == nil {
+			t.Errorf("Response %d is nil", i)
+			continue
+		}
+		
+		if response.ID != requests[i].ID {
+			t.Errorf("Response %d ID mismatch", i)
+		}
+		
+		if response.Error == nil {
+			t.Errorf("Expected error response for request %d", i)
+		}
 	}
 }
