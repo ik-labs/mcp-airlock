@@ -1,18 +1,18 @@
 # Implementation Plan
 
 - [ ] 1. Project scaffolding and core infrastructure setup
-  - Initialize Go 1.24.0+ module with modelcontextprotocol/go-sdk v0.2.0+ dependency
-  - Create repository structure with pkg/, cmd/, internal/, examples/, deploy/ directories
+  - Initialize Go 1.22+ module with modelcontextprotocol/go-sdk v0.2.0+ dependency
+  - Create repository structure with pkg/mcp/ports.go adapter interface for SDK isolation
   - Set up basic configuration loading with koanf and YAML validation
   - Implement structured logging with zap and basic health check endpoints
-  - _Requirements: R7.1, R5.2, R16.1_
+  - _Requirements: R7.1, R5.2, R16.1, R16.5_
 
 - [ ] 2. MCP Go-SDK integration foundation
-- [ ] 2.1 Create basic MCP server wrapper with go-sdk
-  - Implement AirlockServer struct wrapping go-sdk Server
-  - Create HTTP/SSE transport setup using go-sdk transport layer
-  - Add basic request/response logging and correlation ID generation
-  - Write unit tests for server initialization and basic message handling
+- [ ] 2.1 Create basic MCP server wrapper with Go concurrency patterns
+  - Implement AirlockServer with one goroutine per client connection and bounded channels
+  - Create HTTP/SSE transport with proper timeouts, heartbeat, and http.Flusher
+  - Add context propagation for cancellation and correlation ID generation
+  - Write unit tests with httptest and race detection enabled
   - _Requirements: R16.1, R16.2, R16.3, R9.1_
 
 - [ ] 2.2 Implement MCP client connector for upstream servers
@@ -30,11 +30,11 @@
   - _Requirements: R16.4, R9.2, R14.2_
 
 - [ ] 3. Authentication and JWT validation system
-- [ ] 3.1 Implement OIDC/JWT authentication layer
-  - Create Authenticator interface with OIDC discovery and JWT validation
-  - Implement JWKS caching with TTL ≤ 5m and automatic refresh
-  - Add tenant and group extraction from JWT claims
-  - Write unit tests for token validation, JWKS caching, and claim extraction
+- [ ] 3.1 Implement OIDC/JWT authentication with background refresh
+  - Create Authenticator with context-aware background JWKS refresh goroutine
+  - Implement JWT validation with pure Go clock skew handling (±2m)
+  - Add tenant and group extraction with singleflight for cache miss protection
+  - Write unit tests with deterministic time mocking and race detection
   - _Requirements: R2.1, R2.2, R12.2, R10.1_
 
 - [ ] 3.2 Add authentication middleware to MCP server
@@ -44,20 +44,20 @@
   - Write integration tests for authenticated and unauthenticated requests
   - _Requirements: R1.4, R2.1, R2.2_
 
-- [ ] 3.3 Implement rate limiting and abuse protection
-  - Create RateLimiter with per-token and per-IP limits (default 200 req/min)
-  - Add brute-force protection with temporary throttling after 5 failed auths/min/IP
-  - Implement exponential backoff guidance for SSE reconnections with jitter
-  - Write unit tests for rate limiting scenarios and abuse detection
+- [ ] 3.3 Implement rate limiting with golang.org/x/time/rate
+  - Create RateLimiter using rate.Limiter with singleflight for thundering herd protection
+  - Add per-token limits (200 req/min = ~3.33 req/sec) with sync.Map storage
+  - Implement brute-force protection with temporary throttling and exponential backoff
+  - Write unit tests for rate limiting scenarios with deterministic time control
   - _Requirements: R11.1, R11.2, R11.3_
 
 - [ ] 4. Policy engine integration with OPA/Rego
-- [ ] 4.1 Create OPA policy engine wrapper
-  - Implement PolicyEngine interface with OPA/Rego integration
-  - Add policy compilation, caching, and hot-reload via SIGHUP
-  - Create PolicyInput/PolicyDecision types with tenant isolation
-  - Write unit tests for policy loading, compilation, and basic decisions
-  - _Requirements: R2.3, R2.5, R7.2, R12.3_
+- [ ] 4.1 Create OPA policy engine wrapper with Last-Known-Good fallback
+  - Implement PolicyEngine interface with OPA/Rego integration and LKG policy storage
+  - Add policy compilation, caching, and hot-reload via SIGHUP with fallback behavior
+  - Create PolicyInput/PolicyDecision types with per-tenant cache isolation
+  - Write unit tests for policy loading, compilation, LKG fallback, and basic decisions
+  - _Requirements: R2.3, R2.5, R7.2, R12.3, R13.2_
 
 - [ ] 4.2 Integrate policy engine with request processing
   - Add policy middleware to MCP server request chain
@@ -66,27 +66,27 @@
   - Write integration tests for allow/deny scenarios and policy failures
   - _Requirements: R2.3, R2.4, R8.1, R13.2_
 
-- [ ] 4.3 Create comprehensive policy test suite
-  - Implement golden tests for allow/deny decisions with canary tokens
-  - Add policy validation and error handling tests
-  - Create tenant isolation tests to prevent cross-tenant access
-  - Write performance benchmarks for policy evaluation latency
+- [ ] 4.3 Create comprehensive policy test suite with Go testing tools
+  - Implement golden tests with property-based testing using testing/quick
+  - Add fuzzing tests for policy input validation with Go 1.18+ fuzzing
+  - Create tenant isolation tests with sharded cache validation
+  - Write performance benchmarks targeting sub-millisecond policy evaluation
   - _Requirements: R14.1, R10.2, R6.5_
 
 - [ ] 5. Root virtualization and access control
-- [ ] 5.1 Implement virtual root mapping system
-  - Create RootMapper interface for virtual URI to real path translation
-  - Add support for filesystem and S3 backend types
-  - Implement path normalization and traversal attack prevention
-  - Write unit tests for URI mapping, path validation, and security checks
+- [ ] 5.1 Implement virtual root mapping with Go path security
+  - Create RootMapper using filepath.Clean and symlink validation
+  - Add zero-copy streaming for S3 and filesystem resources with io.Reader
+  - Implement path sandboxing with optional openat2 syscall on Linux
+  - Write property-based tests for path traversal prevention with testing/quick
   - _Requirements: R4.1, R4.3, R4.4, R4.5_
 
-- [ ] 5.2 Add read-only enforcement and access control
-  - Implement syscall-level write protection for filesystem roots
-  - Add S3 write operation blocking unless explicitly allow-listed
-  - Create access validation for different operation types (read/write/list)
-  - Write integration tests for read-only enforcement and write blocking
-  - _Requirements: R4.2, R4.5_
+- [ ] 5.2 Add read-only enforcement via mount-level and path sandboxing
+  - Implement mount-level readOnly enforcement and path sandboxing (filepath.Clean, deny symlinks)
+  - Add S3 read-only mode except for single allow-listed artifacts prefix
+  - Create resource URI whitelist validation (only mcp://repo/, mcp://artifacts/ schemes)
+  - Write integration tests for read-only enforcement and URI validation
+  - _Requirements: R4.2, R4.5, R19.1, R19.2, R19.4_
 
 - [ ] 5.3 Integrate root virtualization with MCP message processing
   - Add root mapping to MCP request/response processing pipeline
@@ -96,11 +96,11 @@
   - _Requirements: R4.1, R4.4, R4.5_
 
 - [ ] 6. DLP redaction and data protection
-- [ ] 6.1 Create configurable redaction engine
-  - Implement Redactor interface with regex pattern compilation
-  - Add support for structured JSON field redaction
-  - Create configurable redaction patterns (email, tokens, PII)
-  - Write unit tests for pattern matching, replacement, and performance
+- [ ] 6.1 Create memory-efficient redaction engine
+  - Implement Redactor with sync.Pool for buffer reuse and compiled regex patterns
+  - Add streaming redaction to avoid buffering large payloads
+  - Create configurable redaction patterns with fuzzing tests for edge cases
+  - Write benchmarks for redaction performance with memory allocation tracking
   - _Requirements: R3.2, R3.4, R15.2_
 
 - [ ] 6.2 Integrate redaction with request/response processing
@@ -132,26 +132,26 @@
   - Write integration tests for complete audit trail coverage
   - _Requirements: R3.1, R8.1, R8.2, R8.3_
 
-- [ ] 7.3 Add audit retention and export capabilities
+- [ ] 7.3 Add audit retention and tombstone-based erasure
   - Implement configurable retention policies with automatic cleanup (default 30 days)
   - Add JSONL export format with optional S3 export and KMS encryption
-  - Create data subject erasure capability by tokenized subject ID
-  - Write tests for retention policies, export functionality, and compliance features
+  - Create subject erasure via tombstone events (preserves hash-chain integrity)
+  - Write tests for retention policies, export functionality, and tombstone erasure
   - _Requirements: R15.1, R15.3, R8.4_
 
 - [ ] 8. Error handling and resilience patterns
-- [ ] 8.1 Implement comprehensive error handling with go-sdk types
-  - Create error mapping functions using go-sdk error types for MCP compliance
-  - Add circuit breaker pattern for upstream server failures
-  - Implement graceful degradation when audit store or policy engine fails
-  - Write unit tests for error scenarios and circuit breaker behavior
-  - _Requirements: R9.2, R13.1, R13.2_
+- [ ] 8.1 Implement deterministic error handling with HTTP-to-MCP mapping
+  - Create error mapping table (401→InvalidRequest, 403→Forbidden, 413→RequestTooLarge, etc.)
+  - Add basic retry/backoff for upstream failures (circuit breaker in v1.1)
+  - Implement graceful degradation when audit store fails (buffer events)
+  - Write unit tests for error scenarios and deterministic error responses
+  - _Requirements: R9.2, R13.1, R20.1, R20.2, R20.3, R20.4, R20.5_
 
-- [ ] 8.2 Add timeout and backpressure handling
-  - Implement configurable timeouts (connect 2s, upstream call 30s)
-  - Add bounded queues for SSE connections (max 1,000 events per connection)
-  - Create backpressure handling with client abort cancellation
-  - Write integration tests for timeout scenarios and queue overflow handling
+- [ ] 8.2 Add timeout, backpressure, and SSE heartbeat handling
+  - Implement configurable timeouts (connect 2s, upstream call 30s) with ALB idle ≥ 120s
+  - Add SSE heartbeat every 15-30s to prevent ALB connection drops
+  - Add bounded queues for SSE connections with fail-fast on oversized JSON-RPC
+  - Write integration tests for timeout scenarios, heartbeat, and message size limits
   - _Requirements: R6.3, R6.4, R9.3_
 
 - [ ] 8.3 Implement health checks and monitoring
@@ -206,12 +206,12 @@
   - _Requirements: R5.1, R7.5_
 
 - [ ] 11. Kubernetes deployment and packaging
-- [ ] 11.1 Create Docker images and Helm charts
-  - Implement multi-stage Docker builds with security scanning
-  - Create Helm charts with configurable values and security defaults
-  - Add Kubernetes manifests for RBAC, NetworkPolicies, and PodSecurityPolicies
-  - Write deployment tests for Kubernetes environments
-  - _Requirements: R5.1, R5.5_
+- [ ] 11.1 Create Docker images and Helm charts with modern security
+  - Implement multi-stage Docker builds with non-root user and read-only filesystem
+  - Create Helm charts with Pod Security Admission (PSA) levels and NetworkPolicy
+  - Add per-pod SQLite PVC configuration (no sharing across replicas)
+  - Write deployment tests for Kubernetes environments with security validation
+  - _Requirements: R5.1, R5.5, R17.3_
 
 - [ ] 11.2 Add CI/CD pipeline with security scanning
   - Implement GitHub Actions workflow with automated testing

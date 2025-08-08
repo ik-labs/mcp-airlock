@@ -15,13 +15,14 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 ### Technology Stack
 
-- **Language**: Go 1.24.0+
-- **MCP Protocol**: modelcontextprotocol/go-sdk v0.2.0+ (server, client, transport)
+- **Language**: Go 1.22+ (stable version for production reliability)
+- **MCP Protocol**: modelcontextprotocol/go-sdk v0.2.0+ via adapter interface (pkg/mcp/ports.go)
 - **Authentication**: golang-jwt/jwt/v5, coreos/go-oidc for OIDC discovery
-- **Policy Engine**: github.com/open-policy-agent/opa/rego
-- **Configuration**: YAML via koanf
-- **Data Redaction**: Go stdlib regexp with compiled patterns
-- **Audit Storage**: SQLite with WAL mode (MVP), PostgreSQL support later
+- **Policy Engine**: github.com/open-policy-agent/opa/rego with Last-Known-Good fallback
+- **Configuration**: YAML via koanf with hot-reload support
+- **Data Redaction**: Go stdlib regexp with compiled patterns (regex-first, structured later)
+- **Audit Storage**: SQLite with WAL mode per-pod (MVP), PostgreSQL support later
+- **Rate Limiting**: In-memory (MVP), Redis/Memcached (v1.1)
 - **Observability**: OpenTelemetry (OTLP) + zap structured logging
 - **Packaging**: Docker multi-stage builds, Helm charts for Kubernetes
 - **CI/CD**: GitHub Actions with Trivy security scanning + Cosign signing
@@ -100,6 +101,288 @@ type AirlockGateway struct {
     authMiddleware   AuthenticationMiddleware
     policyMiddleware PolicyMiddleware
     auditMiddleware  AuditMiddleware
+}
+```
+
+### Go-Specific Implementation Patterns
+
+**Concurrency Architecture:**
+```go
+// One goroutine per client connection with bounded channels
+type ClientConnection struct {
+    id       string
+    outbound chan []byte // bounded to 1,000 events
+    ctx      context.Context
+    cancel   context.CancelFunc
+}
+
+// Context propagation for cancellation
+func (s *AirlockServer) HandleRequest(ctx context.Context, req *Request) (*Response, error) {
+    // ctx flows: HTTP handler → auth → policy → upstream → response
+    ctx = withCorrelationID(ctx, generateID())
+    
+    // Early timeout and cancellation
+    ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+    defer cancel()
+    
+    return s.processWithMiddleware(ctx, req)
+}
+
+// Bounded goroutines with errgroup
+func (s *AirlockServer) Start(ctx context.Context) error {
+    g, ctx := errgroup.WithContext(ctx)
+    
+    // Concurrent startup: JWKS refresh + policy load + upstream warmup
+    g.Go(func() error { return s.refreshJWKS(ctx) })
+    g.Go(func() error { return s.loadPolicy(ctx) })
+    g.Go(func() error { return s.warmupUpstreams(ctx) })
+    
+    return g.Wait() // fail fast if any component fails
+}
+```
+
+**Performance-Optimized HTTP/SSE:**
+```go
+// Tuned HTTP server
+func NewServer() *http.Server {
+    return &http.Server{
+        ReadHeaderTimeout: 5 * time.Second,
+        IdleTimeout:      120 * time.Second, // ALB-friendly
+        MaxHeaderBytes:   32 << 10,          // 32KB headers max
+    }
+}
+
+// SSE with heartbeat and early size rejection
+func (c *ClientConnection) sseWriter(w http.ResponseWriter) {
+    flusher := w.(http.Flusher)
+    heartbeat := time.NewTicker(20 * time.Second)
+    defer heartbeat.Stop()
+    
+    for {
+        select {
+        case msg := <-c.outbound:
+            // Fail fast on oversized messages
+            if len(msg) > 256*1024 {
+                c.sendError("request_too_large")
+                continue
+            }
+            
+            fmt.Fprintf(w, "data: %s\n\n", msg)
+            flusher.Flush()
+            
+        case <-heartbeat.C:
+            fmt.Fprintf(w, ": heartbeat\n\n")
+            flusher.Flush()
+            
+        case <-c.ctx.Done():
+            return
+        }
+    }
+}
+
+// Early size rejection with LimitedReader
+func (s *AirlockServer) parseRequest(r *http.Request) (*Request, error) {
+    limited := &io.LimitedReader{R: r.Body, N: 256 * 1024}
+    
+    var req Request
+    if err := json.NewDecoder(limited).Decode(&req); err != nil {
+        if limited.N == 0 {
+            return nil, ErrRequestTooLarge
+        }
+        return nil, err
+    }
+    return &req, nil
+}
+```
+
+**Rate Limiting with Built-in Tools:**
+```go
+import "golang.org/x/time/rate"
+
+// Per-token rate limiter with singleflight for cache misses
+type RateLimiter struct {
+    limiters sync.Map // map[string]*rate.Limiter
+    sf       singleflight.Group
+}
+
+func (rl *RateLimiter) Allow(token string) bool {
+    limiter, _ := rl.sf.Do(token, func() (interface{}, error) {
+        if l, ok := rl.limiters.Load(token); ok {
+            return l, nil
+        }
+        
+        // 200 req/min = ~3.33 req/sec with burst of 10
+        limiter := rate.NewLimiter(rate.Limit(3.33), 10)
+        rl.limiters.Store(token, limiter)
+        return limiter, nil
+    })
+    
+    return limiter.(*rate.Limiter).Allow()
+}
+```
+
+**Memory-Efficient Resource Handling:**
+```go
+// Zero-copy streaming with sync.Pool
+var bufferPool = sync.Pool{
+    New: func() interface{} {
+        return make([]byte, 32*1024) // 32KB buffers
+    },
+}
+
+// Stream large resources without buffering
+func (r *RootMapper) streamResource(ctx context.Context, uri string) (io.ReadCloser, error) {
+    switch {
+    case strings.HasPrefix(uri, "s3://"):
+        // AWS SDK returns io.ReadCloser - stream directly
+        return r.s3Client.GetObject(ctx, &s3.GetObjectInput{
+            Bucket: aws.String(bucket),
+            Key:    aws.String(key),
+        })
+        
+    case strings.HasPrefix(uri, "file://"):
+        // File streaming with proper cleanup
+        return os.Open(r.mapToRealPath(uri))
+    }
+}
+
+// Reuse JSON encoders in hot paths
+var encoderPool = sync.Pool{
+    New: func() interface{} {
+        return json.NewEncoder(nil)
+    },
+}
+```
+
+**Robust Authentication with Background Refresh:**
+```go
+// JWKS refresh with context-aware background goroutine
+func (a *Authenticator) startJWKSRefresh(ctx context.Context) {
+    ticker := time.NewTicker(5 * time.Minute)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ticker.C:
+            if err := a.refreshJWKS(ctx); err != nil {
+                log.Error("JWKS refresh failed", "error", err)
+                // Continue with cached keys
+            }
+            
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+
+// Clock skew handling in pure Go
+func (a *Authenticator) validateTiming(claims *jwt.Claims) error {
+    now := time.Now()
+    skew := 2 * time.Minute
+    
+    if claims.ExpiresAt != nil && now.After(claims.ExpiresAt.Add(skew)) {
+        return ErrTokenExpired
+    }
+    
+    if claims.NotBefore != nil && now.Before(claims.NotBefore.Add(-skew)) {
+        return ErrTokenNotYetValid
+    }
+    
+    return nil
+}
+```
+
+**Policy Engine with LKG and Caching:**
+```go
+// Sharded decision cache with per-tenant isolation
+type PolicyCache struct {
+    shards []*sync.Map // 16 shards to reduce contention
+    ttl    time.Duration
+}
+
+func (pc *PolicyCache) Get(tenant, key string) (*PolicyDecision, bool) {
+    shard := pc.shards[hash(tenant+key)%16]
+    
+    if entry, ok := shard.Load(key); ok {
+        cached := entry.(*CacheEntry)
+        if time.Since(cached.timestamp) < pc.ttl {
+            return cached.decision, true
+        }
+        shard.Delete(key) // expired
+    }
+    return nil, false
+}
+
+// Last-Known-Good policy with atomic swapping
+type PolicyEngine struct {
+    current atomic.Value // *rego.PreparedEvalQuery
+    lkg     atomic.Value // *rego.PreparedEvalQuery
+}
+
+func (pe *PolicyEngine) ReloadPolicy(policy string) error {
+    compiled, err := rego.New(rego.Query("data.airlock.authz.allow")).PrepareForEval(context.Background())
+    if err != nil {
+        log.Error("Policy compilation failed, keeping LKG", "error", err)
+        return err
+    }
+    
+    // Atomic swap - no locks needed
+    pe.current.Store(&compiled)
+    if pe.lkg.Load() == nil {
+        pe.lkg.Store(&compiled) // First successful compile becomes LKG
+    }
+    
+    return nil
+}
+```
+
+**Path Sandboxing with Modern Syscalls:**
+```go
+// Safe path resolution with filepath.Clean and validation
+func (rm *RootMapper) validatePath(virtualPath, realRoot string) (string, error) {
+    // Clean and validate virtual path
+    cleaned := filepath.Clean(virtualPath)
+    
+    // Reject dangerous patterns
+    if strings.Contains(cleaned, "..") || filepath.IsAbs(cleaned) {
+        return "", ErrPathTraversal
+    }
+    
+    // Build real path
+    realPath := filepath.Join(realRoot, cleaned)
+    
+    // Ensure it's still within root (handles symlinks)
+    if !strings.HasPrefix(realPath, realRoot) {
+        return "", ErrPathEscape
+    }
+    
+    // Optional: use openat2 with RESOLVE_BENEATH on Linux 5.6+
+    if runtime.GOOS == "linux" {
+        return rm.openat2Resolve(realRoot, cleaned)
+    }
+    
+    return realPath, nil
+}
+```
+
+**Built-in Observability:**
+```go
+// Structured logging with correlation IDs
+func (s *AirlockServer) logRequest(ctx context.Context, decision string, latency time.Duration) {
+    slog.InfoContext(ctx, "request_processed",
+        "tenant", getTenant(ctx),
+        "tool", getTool(ctx),
+        "decision", decision,
+        "latency_ms", latency.Milliseconds(),
+        "correlation_id", getCorrelationID(ctx),
+    )
+}
+
+// Built-in profiling for production debugging
+func (s *AirlockServer) enableProfiling() {
+    go func() {
+        log.Println(http.ListenAndServe("localhost:6060", nil)) // pprof endpoints
+    }()
 }
 ```
 
@@ -477,15 +760,16 @@ allow if {
     allowed_resource[input.resource]
 }
 
-# Define allowed tools per tenant/group
+# Define allowed tools per tenant/group (explicit lists preferred)
 allowed_tool contains tool if {
     tool := input.tool
     tool in ["search_docs", "read_file", "list_directory"]
+    input.groups[_] == "mcp.users"
 }
 
 allowed_tool contains tool if {
     tool := input.tool
-    startswith(tool, "read_")
+    tool in ["read_file", "read_directory", "read_config", "search_docs"]
     input.groups[_] == "mcp.power_users"
 }
 
@@ -548,15 +832,35 @@ deny_reason contains msg if {
 
 ### Error Response Format
 
-All errors use go-sdk error types to ensure MCP specification compliance:
+All errors use go-sdk error types with deterministic HTTP-to-MCP mapping:
+
+| HTTP Status | Scenario | MCP Error Code | Data Fields |
+|-------------|----------|----------------|-------------|
+| 401 | Missing/invalid token | InvalidRequest | `www_authenticate`, `correlation_id` |
+| 403 | Policy denial | Forbidden | `reason`, `rule_id`, `correlation_id`, `tenant` |
+| 413 | Message too large | RequestTooLarge | `max_size_kb`, `actual_size_kb` |
+| 502 | Upstream failure | InternalError | `upstream_status`, `correlation_id` |
+| 500 | Internal error | InternalError | `correlation_id` (no sensitive details) |
 
 ```go
 import "github.com/modelcontextprotocol/go-sdk/pkg/protocol"
 
-// Policy denial error
+// Error mapping functions
+func NewAuthenticationError(reason string) *protocol.Error {
+    return &protocol.Error{
+        Code:    protocol.ErrorCodeInvalidRequest,
+        Message: "Authentication failed",
+        Data: map[string]interface{}{
+            "reason":           reason,
+            "www_authenticate": "Bearer realm=\"mcp-airlock\"",
+            "correlation_id":   generateCorrelationID(),
+        },
+    }
+}
+
 func NewPolicyDenialError(reason, ruleID, tenant string) *protocol.Error {
     return &protocol.Error{
-        Code:    protocol.ErrorCodeInternalError,
+        Code:    protocol.ErrorCodeForbidden,
         Message: "Policy denied request",
         Data: map[string]interface{}{
             "reason":         reason,
@@ -567,14 +871,14 @@ func NewPolicyDenialError(reason, ruleID, tenant string) *protocol.Error {
     }
 }
 
-// Authentication error
-func NewAuthenticationError(reason string) *protocol.Error {
+func NewMessageTooLargeError(maxSize, actualSize int) *protocol.Error {
     return &protocol.Error{
-        Code:    protocol.ErrorCodeInvalidRequest,
-        Message: "Authentication failed",
+        Code:    protocol.ErrorCodeRequestTooLarge,
+        Message: "Request too large",
         Data: map[string]interface{}{
-            "reason": reason,
-            "www_authenticate": "Bearer realm=\"mcp-airlock\"",
+            "max_size_kb":    maxSize,
+            "actual_size_kb": actualSize,
+            "correlation_id": generateCorrelationID(),
         },
     }
 }
@@ -694,8 +998,9 @@ airlock/
 ├── pkg/
 │   ├── server/              # MCP server wrapper with security middleware
 │   ├── client/              # MCP client pool and upstream management
+│   ├── mcp/                 # MCP SDK adapter interface (ports.go)
 │   ├── auth/                # Authentication and JWT validation
-│   ├── policy/              # OPA policy engine integration
+│   ├── policy/              # OPA policy engine with LKG fallback
 │   ├── roots/               # Virtual root mapping and access control
 │   ├── redact/              # DLP redaction and pattern matching
 │   ├── audit/               # Audit logging and hash chaining
@@ -786,13 +1091,15 @@ Internet/VPN Users
 - Managed via Kubernetes Deployments with service discovery
 
 **Storage Layer:**
-- **Audit**: SQLite on PVC (MVP) → PostgreSQL/RDS (production)
-- **Virtual Roots**: EFS/EBS for filesystem access
-- **Artifacts**: S3 buckets with IAM-based access control
+- **Audit**: SQLite per-pod with local PVC (single writer, no sharing across replicas)
+- **Virtual Roots**: EFS/EBS for filesystem access (read-only via mount-level enforcement)
+- **Artifacts**: S3 buckets (read-only except single allow-listed prefix)
 
 **Security:**
-- Network policies restricting pod-to-pod communication
+- Pod Security Admission (PSA) levels + NetworkPolicy (not deprecated PodSecurityPolicies)
 - Egress filtering: only OIDC issuer and S3 endpoints
+- SSE heartbeat every 15-30s; ALB idle timeout ≥ 120s
+- Resource URI whitelist: only configured virtual schemes (mcp://repo/, mcp://artifacts/)
 - Secrets management via Kubernetes Secrets or AWS Secrets Manager
 
 ### Helm Configuration Example
@@ -949,4 +1256,157 @@ mcp-client connect $MCP_ENDPOINT --token $MCP_TOKEN
 - Configuration backup and GitOps deployment
 - RTO/RPO targets for service restoration
 
-This design provides a comprehensive, production-ready architecture that addresses all the requirements while maintaining high performance, security, and operational excellence. The modular design allows for independent testing and deployment of components while ensuring clear separation of concerns. By building on the official MCP Go SDK, we ensure protocol compliance and benefit from ongoing SDK improvements.
+### Go-Specific Testing and Build Patterns
+
+**Testing with Go's Built-in Tools:**
+```go
+// Property-based testing for path validation
+func TestPathValidation(t *testing.T) {
+    f := func(path string) bool {
+        cleaned, err := validatePath(path, "/safe/root")
+        if err != nil {
+            return true // rejection is always safe
+        }
+        return strings.HasPrefix(cleaned, "/safe/root")
+    }
+    
+    if err := quick.Check(f, nil); err != nil {
+        t.Error(err)
+    }
+}
+
+// Fuzzing for JSON-RPC parsing (Go 1.18+)
+func FuzzJSONRPCParsing(f *testing.F) {
+    f.Add(`{"jsonrpc":"2.0","method":"test","id":1}`)
+    
+    f.Fuzz(func(t *testing.T, data string) {
+        var req Request
+        json.Unmarshal([]byte(data), &req) // Should never panic
+    })
+}
+
+// httptest for SSE flows without live infrastructure
+func TestSSEConnection(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(sseHandler))
+    defer server.Close()
+    
+    // Test SSE connection and heartbeat
+    resp, err := http.Get(server.URL + "/sse")
+    require.NoError(t, err)
+    
+    scanner := bufio.NewScanner(resp.Body)
+    // Verify heartbeat and message format
+}
+
+// Deterministic time for cache TTL testing
+type MockClock struct{ now time.Time }
+func (m *MockClock) Now() time.Time { return m.now }
+func (m *MockClock) Advance(d time.Duration) { m.now = m.now.Add(d) }
+
+// Benchmarks for critical paths
+func BenchmarkPolicyEvaluation(b *testing.B) {
+    engine := setupPolicyEngine()
+    input := &PolicyInput{Tool: "read_file", Resource: "mcp://repo/test.txt"}
+    
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        engine.Evaluate(context.Background(), input)
+    }
+}
+```
+
+**Production Build Optimizations:**
+```dockerfile
+# Multi-stage build with Go optimizations
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Optimized build flags
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -trimpath \
+    -o airlock ./cmd/airlock
+
+# Minimal runtime with non-root user
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /app/airlock /airlock
+
+USER nobody
+EXPOSE 8080
+ENTRYPOINT ["/airlock"]
+```
+
+**CI/CD with Go Tools:**
+```yaml
+# .github/workflows/ci.yml
+- name: Test with race detection
+  run: go test -race -coverprofile=coverage.out ./...
+
+- name: Fuzz testing
+  run: go test -fuzz=. -fuzztime=30s ./...
+
+- name: Static analysis
+  run: |
+    go vet ./...
+    staticcheck ./...
+    gosec ./...
+
+- name: Benchmark regression
+  run: go test -bench=. -benchmem ./... > bench.txt
+
+- name: Build optimized binary
+  run: |
+    go build -ldflags="-s -w" -trimpath ./cmd/airlock
+    syft airlock -o spdx-json > sbom.json
+```
+
+**Memory and Performance Monitoring:**
+```go
+// Built-in profiling endpoints
+import _ "net/http/pprof"
+
+func main() {
+    // Enable pprof in production (behind auth)
+    go func() {
+        log.Println(http.ListenAndServe("localhost:6060", nil))
+    }()
+    
+    // Runtime metrics
+    go func() {
+        for {
+            var m runtime.MemStats
+            runtime.ReadMemStats(&m)
+            
+            log.Printf("Alloc=%d KB, Sys=%d KB, NumGC=%d", 
+                m.Alloc/1024, m.Sys/1024, m.NumGC)
+            
+            time.Sleep(30 * time.Second)
+        }
+    }()
+}
+
+// GC tuning for consistent latency
+func init() {
+    // Tune GC for lower latency (measure first!)
+    debug.SetGCPercent(100) // Default, adjust based on profiling
+}
+```
+
+**Why Go Excels for Airlock:**
+
+1. **Concurrency Model**: Goroutines map perfectly to our "one connection = one goroutine" model with bounded channels preventing memory exhaustion
+2. **HTTP/SSE Built-ins**: `net/http` with `http.Flusher` gives us production-ready SSE with minimal code
+3. **Context Propagation**: `context.Context` provides clean cancellation from client disconnect through the entire request pipeline
+4. **Memory Efficiency**: `sync.Pool` for buffer reuse, zero-copy streaming with `io.Reader`, and predictable GC behavior
+5. **Built-in Security**: Race detector catches concurrency bugs, fuzzing finds parsing edge cases, and `go vet` prevents common mistakes
+6. **Operational Excellence**: `pprof` for live debugging, `expvar` for metrics, and deterministic builds with module checksums
+7. **Performance**: Sub-60ms p95 latency achievable with careful allocation patterns and Go's efficient runtime
+
+This design provides a comprehensive, production-ready architecture that addresses all the requirements while maintaining high performance, security, and operational excellence. The modular design allows for independent testing and deployment of components while ensuring clear separation of concerns. By building on the official MCP Go SDK and leveraging Go's concurrency primitives, we ensure protocol compliance and optimal performance characteristics.

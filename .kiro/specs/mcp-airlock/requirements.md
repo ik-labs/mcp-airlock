@@ -27,7 +27,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 2. WHEN token validation succeeds THEN the system SHALL extract tenant and group information for policy decisions
 3. WHEN a tool call is made THEN the system SHALL enforce allow/deny policies based on user context
 4. IF authentication fails THEN the system SHALL return WWW-Authenticate headers with OAuth2 metadata
-5. WHEN policies are updated THEN the system SHALL hot-reload with no 5xx during reload and fail-closed if policy fails to compile with clear denial reason
+5. WHEN policies are updated THEN the system SHALL hot-reload with no 5xx during reload; deny only if no Last-Known-Good (LKG) exists, otherwise keep LKG and alert
 
 ### Requirement 3
 
@@ -48,7 +48,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 #### Acceptance Criteria
 
 1. WHEN a client requests a resource using virtual URI THEN the system SHALL map it to the real internal location
-2. WHEN read-only roots are configured THEN the system SHALL enforce with syscall-level denial for FS and blocked S3 write ops unless allow-listed
+2. WHEN read-only roots are configured THEN the system SHALL enforce via mount-level readOnly and path sandboxing (filepath.Clean, deny symlinks, no .. escapes); seccomp optional
 3. WHEN path traversal attempts are made THEN the system SHALL block them and log security violations
 4. IF a virtual root maps to S3 THEN the system SHALL handle S3-specific operations transparently
 5. WHEN multiple root types are configured THEN the system SHALL route requests to appropriate handlers
@@ -109,7 +109,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 1. WHEN communicating with clients THEN the system SHALL use the official modelcontextprotocol/go-sdk for MCP protocol handling over HTTP + SSE transport
 2. WHEN errors occur THEN the system SHALL use go-sdk error types and mapping to ensure MCP spec compliance
-3. WHEN message size limits are exceeded THEN the system SHALL use go-sdk transport limits and return appropriate MCP errors with configurable max size (default 256 KiB)
+3. WHEN message size limits are exceeded THEN the system SHALL fail fast on oversized JSON-RPC (256 KiB default) and stream resource bodies for large content
 
 ### Requirement 10
 
@@ -127,7 +127,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 #### Acceptance Criteria
 
-1. WHEN rate limits are exceeded THEN the system SHALL enforce per-token rate limit (default 200 req/min) and return 429 with Retry-After
+1. WHEN rate limits are exceeded THEN the system SHALL enforce per-token rate limit (default 200 req/min) with in-memory limiter (MVP); Redis/Memcached for distributed enforcement (v1.1)
 2. WHEN SSE reconnects occur THEN the system SHALL provide exponential backoff guidance with 20-40% jitter
 3. WHEN authentication brute-force is detected THEN the system SHALL implement temporary 401 throttle after 5 failed auths/min/IP
 
@@ -148,7 +148,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 #### Acceptance Criteria
 
 1. WHEN audit store is down THEN the system SHALL continue serving but emit critical alert and buffer up to 10k events with backpressure after
-2. WHEN OPA is unreachable or has compile errors THEN the system SHALL deny all requests with reason "policy_unavailable"
+2. WHEN OPA is unreachable or has compile errors THEN the system SHALL deny only if no Last-Known-Good policy exists; otherwise continue with LKG and emit critical alert
 3. WHEN health checks are performed THEN the system SHALL provide /live and /ready endpoints (ready only when JWKS fetched + policy compiled)
 
 ### Requirement 14
@@ -169,7 +169,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 1. WHEN storing audit data THEN the system SHALL support configurable retention (default 30 days) with S3 export and optional KMS
 2. WHEN redacting PII THEN the system SHALL use unit-tested patterns with documented false-positive budget
-3. WHEN data subject erasure is required THEN the system SHALL support audit row deletion by tokenized subject ID
+3. WHEN data subject erasure is required THEN the system SHALL support subject erasure via tombstone events (not row deletes) to maintain hash-chain integrity
 
 ### Requirement 16
 
@@ -191,7 +191,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 1. WHEN deploying to AWS THEN the system SHALL support single-VPC Kubernetes deployment with ALB ingress and HPA scaling
 2. WHEN configuring upstreams THEN the system SHALL support both Unix socket sidecars and HTTP service connections within the cluster
-3. WHEN storing audit data THEN the system SHALL support SQLite with PVC for MVP and PostgreSQL/RDS for production scale
+3. WHEN storing audit data THEN the system SHALL support SQLite with per-pod PVC (single writer) for MVP and PostgreSQL/RDS for production scale
 4. WHEN managing virtual roots THEN the system SHALL support EFS/EBS for filesystem roots and S3 for object storage roots
 5. IF scaling is needed THEN the system SHALL support horizontal pod autoscaling based on CPU/QPS with pod disruption budgets
 
@@ -206,3 +206,27 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 3. WHEN onboarding developers THEN the system SHALL provide clear connection snippets with endpoint URL and authentication flow
 4. WHEN developers connect THEN the system SHALL return clear MCP-compliant errors with policy reasons and correlation IDs for troubleshooting
 5. IF policy violations occur THEN the system SHALL provide actionable error messages that help developers understand access requirements
+
+### Requirement 19
+
+**User Story:** As a security engineer, I want strict resource URI validation, so that the gateway only accesses configured virtual schemes and prevents unauthorized resource access.
+
+#### Acceptance Criteria
+
+1. WHEN processing resource requests THEN the system SHALL only allow configured virtual schemes (mcp://repo/, mcp://artifacts/)
+2. WHEN invalid schemes are requested THEN the system SHALL reject file://, http://, or other non-whitelisted schemes
+3. WHEN virtual root mapping occurs THEN the system SHALL validate URI format and prevent scheme injection attacks
+4. WHEN S3 roots are configured THEN the system SHALL start read-only except for single allow-listed artifacts prefix
+5. IF unauthorized schemes are detected THEN the system SHALL log security violations and return clear error messages
+
+### Requirement 20
+
+**User Story:** As a developer, I want deterministic error responses, so that I can programmatically handle different failure scenarios.
+
+#### Acceptance Criteria
+
+1. WHEN authentication fails THEN the system SHALL return HTTP 401 with MCP error containing www_authenticate header
+2. WHEN policy denies access THEN the system SHALL return HTTP 403 with MCP error containing reason, rule_id, and correlation_id
+3. WHEN message size exceeds limits THEN the system SHALL return HTTP 413 with MCP error "request_too_large"
+4. WHEN upstream servers fail THEN the system SHALL return HTTP 502 with MCP error containing upstream status
+5. IF internal errors occur THEN the system SHALL return HTTP 500 with MCP error containing correlation_id but no sensitive details
