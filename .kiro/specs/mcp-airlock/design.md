@@ -15,7 +15,7 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 
 ### Technology Stack
 
-- **Language**: Go 1.22+
+- **Language**: Go 1.24.0+
 - **MCP Protocol**: modelcontextprotocol/go-sdk v0.2.0+ (server, client, transport)
 - **Authentication**: golang-jwt/jwt/v5, coreos/go-oidc for OIDC discovery
 - **Policy Engine**: github.com/open-policy-agent/opa/rego
@@ -726,7 +726,7 @@ airlock/
 ```go
 module github.com/your-org/mcp-airlock
 
-go 1.22
+go 1.24
 
 require (
     github.com/modelcontextprotocol/go-sdk v0.2.0
@@ -739,5 +739,214 @@ require (
     // ... other dependencies
 )
 ```
+
+## Deployment Architecture
+
+### Single-VPC Production Deployment (MVP)
+
+The primary deployment target is a single Kubernetes cluster within an AWS VPC, providing "zero-trust MCP as a service" for organizations:
+
+```
+Internet/VPN Users
+    │
+    │ HTTPS/SSE
+    ▼
+┌─────────────────────────────────────┐
+│              AWS VPC                │
+│                                     │
+│  [ALB Ingress] → [Airlock Pods]     │
+│       │              │              │
+│       │              ▼              │
+│   TLS Term.    [MCP Server Pods]    │
+│                [Unix Sockets]       │
+│                                     │
+│  [EFS/EBS] ← Virtual Roots          │
+│  [S3 Bucket] ← Artifact Storage     │
+│  [RDS/SQLite] ← Audit Storage       │
+│                                     │
+│  Egress: OIDC + S3 only             │
+└─────────────────────────────────────┘
+```
+
+### Deployment Components
+
+**Ingress Layer:**
+- AWS Application Load Balancer (ALB) with TLS termination
+- Kubernetes Ingress Controller routing to Airlock service
+- Security groups allowing HTTPS (443) from authorized networks
+
+**Airlock Layer:**
+- 2-3 stateless pod replicas with Horizontal Pod Autoscaler
+- CPU/QPS-based scaling with pod disruption budgets
+- Health checks: `/live` and `/ready` endpoints
+
+**Upstream MCP Servers:**
+- Option A: Sidecar containers with Unix socket communication
+- Option B: Separate pods with HTTP service communication
+- Managed via Kubernetes Deployments with service discovery
+
+**Storage Layer:**
+- **Audit**: SQLite on PVC (MVP) → PostgreSQL/RDS (production)
+- **Virtual Roots**: EFS/EBS for filesystem access
+- **Artifacts**: S3 buckets with IAM-based access control
+
+**Security:**
+- Network policies restricting pod-to-pod communication
+- Egress filtering: only OIDC issuer and S3 endpoints
+- Secrets management via Kubernetes Secrets or AWS Secrets Manager
+
+### Helm Configuration Example
+
+```yaml
+# values.yaml for single-VPC deployment
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+  hosts:
+    - host: airlock.myorg.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+auth:
+  oidc:
+    issuer: "https://myorg.okta.com/oauth2/default"
+    audience: "mcp-airlock"
+    requiredGroups: ["mcp.users"]
+
+policy:
+  configMap: "airlock-policy"
+  hotReload: true
+
+roots:
+  - name: "repo"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/mnt/repo"
+    readOnly: true
+    storage:
+      type: "efs"
+      volumeId: "fs-12345678"
+  - name: "artifacts"
+    type: "s3"
+    virtual: "mcp://artifacts/"
+    real: "s3://airlock-artifacts/prod/"
+
+upstreams:
+  - name: "docs"
+    type: "unix"
+    socket: "/run/mcp/docs.sock"
+    sidecar:
+      image: "myorg/mcp-docs:latest"
+      command: ["python", "-m", "mcp_server.docs"]
+  - name: "analytics"
+    type: "http"
+    url: "http://mcp-analytics.svc.cluster.local:8080"
+
+scaling:
+  replicas: 3
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+audit:
+  storage:
+    type: "sqlite"  # or "postgresql"
+    pvc:
+      size: "10Gi"
+      storageClass: "gp3"
+  retention: "30d"
+  export:
+    s3Bucket: "airlock-audit-exports"
+
+observability:
+  metrics:
+    enabled: true
+    serviceMonitor: true
+  tracing:
+    enabled: true
+    endpoint: "http://jaeger-collector:14268/api/traces"
+  logging:
+    level: "info"
+    format: "json"
+```
+
+### End-to-End User Flow
+
+**1. Administrator Setup:**
+```bash
+# Deploy Airlock
+helm install airlock ./deploy/helm -f values-prod.yaml
+
+# Configure OIDC integration
+kubectl apply -f oidc-config.yaml
+
+# Set up virtual roots and policies
+kubectl apply -f policy-configmap.yaml
+kubectl apply -f roots-config.yaml
+```
+
+**2. Developer Onboarding:**
+```bash
+# Authenticate with OIDC provider
+airlock auth login --issuer https://myorg.okta.com
+
+# Configure IDE/client
+export MCP_ENDPOINT="https://airlock.myorg.com"
+export MCP_TOKEN="$(airlock auth token)"
+
+# Test connection
+mcp-client connect $MCP_ENDPOINT --token $MCP_TOKEN
+```
+
+**3. Runtime Flow:**
+- Developer IDE connects to Airlock endpoint with Bearer token
+- Airlock validates JWT, applies policies, maps virtual roots
+- Requests proxied to appropriate upstream MCP servers
+- Responses filtered through DLP redaction before return
+- All interactions logged to audit trail with correlation IDs
+
+### Multi-Tenancy Patterns
+
+**Single Organization (MVP):**
+- One Airlock deployment with OPA policies keyed by groups/roles
+- Shared infrastructure with policy-based isolation
+
+**Multi-Tenant B2B (Future):**
+- Separate Airlock deployment per tenant namespace
+- Isolated audit databases and virtual root mappings
+- No shared caches or policy decisions across tenants
+
+### Operational Considerations
+
+**Monitoring:**
+- Prometheus metrics for performance and security events
+- Jaeger tracing for request flow analysis
+- CloudWatch/Loki for structured log aggregation
+
+**Security:**
+- Regular security scanning with Trivy
+- Image signing with Cosign
+- Network policies and pod security standards
+- Secrets rotation and key management
+
+**Disaster Recovery:**
+- Audit log backup to S3 with cross-region replication
+- Configuration backup and GitOps deployment
+- RTO/RPO targets for service restoration
 
 This design provides a comprehensive, production-ready architecture that addresses all the requirements while maintaining high performance, security, and operational excellence. The modular design allows for independent testing and deployment of components while ensuring clear separation of concerns. By building on the official MCP Go SDK, we ensure protocol compliance and benefit from ongoing SDK improvements.

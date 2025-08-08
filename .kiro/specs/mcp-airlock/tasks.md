@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. Project scaffolding and core infrastructure setup
-  - Initialize Go module with modelcontextprotocol/go-sdk v0.2.0+ dependency
+  - Initialize Go 1.24.0+ module with modelcontextprotocol/go-sdk v0.2.0+ dependency
   - Create repository structure with pkg/, cmd/, internal/, examples/, deploy/ directories
   - Set up basic configuration loading with koanf and YAML validation
   - Implement structured logging with zap and basic health check endpoints
@@ -220,12 +220,19 @@
   - Write integration tests for CI/CD pipeline and deployment validation
   - _Requirements: R5.1, R5.5_
 
-- [ ] 11.3 Create example deployments and integration tests
-  - Build sample private MCP server for demonstration purposes
-  - Create end-to-end integration test harness with real MCP clients
-  - Add example configurations for common deployment scenarios
+- [ ] 11.3 Create production-ready Helm values and deployment examples
+  - Create Helm values templates for single-VPC AWS deployment with ALB ingress
+  - Add sidecar and HTTP service upstream configuration examples
+  - Implement EFS/EBS and S3 virtual root integration examples
+  - Write deployment validation tests for Kubernetes environments
+  - _Requirements: R17.1, R17.2, R17.3, R17.4_
+
+- [ ] 11.4 Build sample MCP servers and integration test harness
+  - Create sample MCP servers (docs, analytics) for demonstration
+  - Implement Unix socket sidecar deployment patterns
+  - Add end-to-end integration test harness with real MCP clients
   - Write load tests to validate performance requirements in realistic environments
-  - _Requirements: R14.2, R14.3_
+  - _Requirements: R14.2, R14.3, R17.2_
 
 - [ ] 12. Security hardening and compliance validation
 - [ ] 12.1 Implement security hardening measures
@@ -286,9 +293,16 @@
   - Write production deployment checklist and validation procedures
   - _Requirements: R5.1, R5.5_
 
-- [ ] 14.3 Create final documentation and handover materials
-  - Complete all API documentation and integration guides
-  - Create operational runbooks and troubleshooting guides
+- [ ] 14.3 Create onboarding documentation and developer experience
+  - Write complete administrator setup guide with Helm deployment steps
+  - Create developer onboarding documentation with connection snippets and authentication flow
+  - Add troubleshooting guide with common policy errors and correlation ID lookup
+  - Create demo scenarios showing end-to-end user flow from setup to first MCP connection
+  - _Requirements: R18.1, R18.2, R18.3, R18.4, R18.5_
+
+- [ ] 14.4 Complete operational documentation and handover materials
+  - Finalize API documentation and integration guides
+  - Create operational runbooks for scaling, monitoring, and incident response
   - Write security architecture documentation and threat model
-  - Create training materials and demo scenarios for operators
-  - _Requirements: R7.5, R10.3_
+  - Create training materials and production deployment checklists
+  - _Requirements: R7.5, R17.5_

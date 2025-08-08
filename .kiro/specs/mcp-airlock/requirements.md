@@ -182,3 +182,27 @@ MCP Airlock is a zero-trust gateway that provides secure, policy-enforced access
 3. WHEN handling MCP transports THEN the system SHALL leverage go-sdk HTTP/SSE transport implementations
 4. WHEN processing MCP messages THEN the system SHALL use go-sdk message types and serialization
 5. IF the go-sdk is updated THEN the system SHALL be designed to easily adopt new versions with minimal changes
+
+### Requirement 17
+
+**User Story:** As a platform operator, I want clear deployment patterns for single-VPC production environments, so that I can deploy Airlock as "zero-trust MCP as a service" for my organization.
+
+#### Acceptance Criteria
+
+1. WHEN deploying to AWS THEN the system SHALL support single-VPC Kubernetes deployment with ALB ingress and HPA scaling
+2. WHEN configuring upstreams THEN the system SHALL support both Unix socket sidecars and HTTP service connections within the cluster
+3. WHEN storing audit data THEN the system SHALL support SQLite with PVC for MVP and PostgreSQL/RDS for production scale
+4. WHEN managing virtual roots THEN the system SHALL support EFS/EBS for filesystem roots and S3 for object storage roots
+5. IF scaling is needed THEN the system SHALL support horizontal pod autoscaling based on CPU/QPS with pod disruption budgets
+
+### Requirement 18
+
+**User Story:** As a business administrator, I want a complete onboarding flow from account setup to first MCP connection, so that developers can quickly start using secured MCP services.
+
+#### Acceptance Criteria
+
+1. WHEN setting up Airlock THEN the system SHALL provide Helm values templates for common AWS deployment scenarios
+2. WHEN configuring OIDC THEN the system SHALL support standard IdP integration (Okta, Auth0, Azure AD) with group mapping
+3. WHEN onboarding developers THEN the system SHALL provide clear connection snippets with endpoint URL and authentication flow
+4. WHEN developers connect THEN the system SHALL return clear MCP-compliant errors with policy reasons and correlation IDs for troubleshooting
+5. IF policy violations occur THEN the system SHALL provide actionable error messages that help developers understand access requirements
