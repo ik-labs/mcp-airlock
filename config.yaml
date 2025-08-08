@@ -1,0 +1,79 @@
+# MCP Airlock Configuration Example
+server:
+  addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  tls:
+    cert_file: ""  # Optional: path to TLS certificate
+    key_file: ""   # Optional: path to TLS private key
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+auth:
+  oidc_issuer: "https://accounts.google.com/.well-known/openid-configuration"
+  audience: "mcp-airlock"
+  jwks_cache_ttl: "5m"
+  clock_skew: "2m"
+  required_groups: ["mcp.users"]
+
+policy:
+  rego_file: "configs/policy.rego"
+  cache_ttl: "1m"
+  reload_signal: "SIGHUP"
+
+roots:
+  - name: "repo-readonly"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/var/airlock/mounts/repo"
+    read_only: true
+  - name: "artifacts"
+    type: "s3"
+    virtual: "mcp://artifacts/"
+    real: "s3://airlock-artifacts/"
+    read_only: false
+
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+    - name: "bearer_token"
+      regex: '(?i)bearer\s+[a-z0-9._-]+'
+      replace: "[redacted-token]"
+
+rate_limiting:
+  per_token: "200/min"
+  per_ip: "1000/min"
+  burst: 50
+
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/run/mcp/docs.sock"
+    timeout: "30s"
+    allow_tools: ["search_docs", "read_file"]
+  - name: "code-server"
+    type: "stdio"
+    command: ["python", "-m", "mcp_server.code"]
+    env:
+      PYTHONPATH: "/opt/mcp-servers"
+    timeout: "30s"
+
+audit:
+  backend: "sqlite"
+  database: "/var/lib/airlock/audit.db"
+  retention: "720h"  # 30 days
+  export_format: "jsonl"
+
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: false
+    endpoint: "http://jaeger:14268/api/traces"
+  logging:
+    level: "info"
+    format: "json"

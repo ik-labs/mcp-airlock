@@ -1,0 +1,33 @@
+server:
+  addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+auth:
+  oidc_issuer: "https://accounts.google.com/.well-known/openid-configuration"
+  audience: "mcp-airlock"
+  jwks_cache_ttl: "5m"
+  clock_skew: "2m"
+
+policy:
+  rego_file: "policy.rego"
+  cache_ttl: "1m"
+
+upstreams:
+  - name: "test-server"
+    type: "stdio"
+    command: ["echo", "test"]
+    timeout: "30s"
+
+audit:
+  backend: "sqlite"
+  database: "/tmp/audit.db"
+  retention: "720h"
+
+observability:
+  logging:
+    level: "info"
+    format: "json"
