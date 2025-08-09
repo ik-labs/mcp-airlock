@@ -52,21 +52,21 @@
   - _Requirements: R11.1, R11.2, R11.3_
 
 - [ ] 4. Policy engine integration with OPA/Rego
-- [ ] 4.1 Create OPA policy engine wrapper with Last-Known-Good fallback
+- [x] 4.1 Create OPA policy engine wrapper with Last-Known-Good fallback
   - Implement PolicyEngine interface with OPA/Rego integration and LKG policy storage
   - Add policy compilation, caching, and hot-reload via SIGHUP with fallback behavior
   - Create PolicyInput/PolicyDecision types with per-tenant cache isolation
   - Write unit tests for policy loading, compilation, LKG fallback, and basic decisions
   - _Requirements: R2.3, R2.5, R7.2, R12.3, R13.2_
 
-- [ ] 4.2 Integrate policy engine with request processing
+- [x] 4.2 Integrate policy engine with request processing
   - Add policy middleware to MCP server request chain
   - Implement fail-closed behavior when policy engine is unavailable
   - Add policy decision logging with rule ID and input digest
   - Write integration tests for allow/deny scenarios and policy failures
   - _Requirements: R2.3, R2.4, R8.1, R13.2_
 
-- [ ] 4.3 Create comprehensive policy test suite with Go testing tools
+- [x] 4.3 Create comprehensive policy test suite with Go testing tools
   - Implement golden tests with property-based testing using testing/quick
   - Add fuzzing tests for policy input validation with Go 1.18+ fuzzing
   - Create tenant isolation tests with sharded cache validation

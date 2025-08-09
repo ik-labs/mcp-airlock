@@ -1,0 +1,97 @@
+[
+  {
+    "name": "allow_read_file_for_mcp_users",
+    "input": {
+      "sub": "user@example.com",
+      "tenant": "tenant-1",
+      "groups": ["mcp.users"],
+      "tool": "read_file",
+      "resource": "mcp://repo/README.md",
+      "method": "GET",
+      "headers": null
+    },
+    "expected": {
+      "allow": true,
+      "reason": "policy allowed request",
+      "rule_id": "airlock.authz.allow",
+      "metadata": {}
+    },
+    "policy": "test_policy_placeholder"
+  },
+  {
+    "name": "deny_write_file_for_mcp_users",
+    "input": {
+      "sub": "user@example.com",
+      "tenant": "tenant-1",
+      "groups": ["mcp.users"],
+      "tool": "write_file",
+      "resource": "mcp://repo/test.txt",
+      "method": "POST",
+      "headers": null
+    },
+    "expected": {
+      "allow": false,
+      "reason": "policy denied request",
+      "rule_id": "airlock.authz.default_deny",
+      "metadata": {}
+    },
+    "policy": "test_policy_placeholder"
+  },
+  {
+    "name": "allow_write_file_for_mcp_admins",
+    "input": {
+      "sub": "admin@example.com",
+      "tenant": "tenant-1",
+      "groups": ["mcp.admins"],
+      "tool": "write_file",
+      "resource": "mcp://artifacts/data.json",
+      "method": "POST",
+      "headers": null
+    },
+    "expected": {
+      "allow": true,
+      "reason": "policy allowed request",
+      "rule_id": "airlock.authz.allow",
+      "metadata": {}
+    },
+    "policy": "test_policy_placeholder"
+  },
+  {
+    "name": "deny_path_traversal_attack",
+    "input": {
+      "sub": "user@example.com",
+      "tenant": "tenant-1",
+      "groups": ["mcp.users"],
+      "tool": "read_file",
+      "resource": "mcp://repo/../etc/passwd",
+      "method": "GET",
+      "headers": null
+    },
+    "expected": {
+      "allow": false,
+      "reason": "policy denied request",
+      "rule_id": "airlock.authz.default_deny",
+      "metadata": {}
+    },
+    "policy": "test_policy_placeholder"
+  },
+  {
+    "name": "deny_no_groups",
+    "input": {
+      "sub": "user@example.com",
+      "tenant": "tenant-1",
+      "groups": [],
+      "tool": "read_file",
+      "resource": "mcp://repo/README.md",
+      "method": "GET",
+      "headers": null
+    },
+    "expected": {
+      "allow": false,
+      "reason": "policy denied request",
+      "rule_id": "airlock.authz.default_deny",
+      "metadata": {}
+    },
+    "policy": "test_policy_placeholder"
+  }
+]
