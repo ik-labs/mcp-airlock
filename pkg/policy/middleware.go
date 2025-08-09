@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -91,13 +92,20 @@ func (pm *PolicyMiddleware) generateInputDigest(input *PolicyInput) string {
 	h.Write([]byte(input.Method))
 
 	// Include groups in sorted order for consistency
+	// Sort groups for deterministic hashing
+	sort.Strings(input.Groups)
 	for _, group := range input.Groups {
 		h.Write([]byte(group))
 	}
 
 	// Include header keys only (not values) to avoid logging sensitive data
-	for key := range input.Headers {
-		h.Write([]byte(key))
+	keys := make([]string, 0, len(input.Headers))
+	for k := range input.Headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write([]byte(k))
 	}
 
 	return hex.EncodeToString(h.Sum(nil))[:16]

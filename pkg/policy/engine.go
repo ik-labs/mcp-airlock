@@ -66,8 +66,8 @@ func NewPolicyCache(ttl time.Duration) *PolicyCache {
 // Get retrieves a cached policy decision
 func (pc *PolicyCache) Get(tenant, key string) (*PolicyDecision, bool) {
 	shardKey := pc.getShardKey(tenant, key)
-	shard := pc.shards[pc.hash(shardKey)%16]
-
+	idx := int(pc.hash(shardKey) & 0xF) // 0–15
+	shard := pc.shards[idx]
 	if entry, ok := shard.Load(key); ok {
 		cached := entry.(*CacheEntry)
 		if time.Since(cached.timestamp) < pc.ttl {
