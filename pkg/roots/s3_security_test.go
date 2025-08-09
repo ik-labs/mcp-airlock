@@ -68,7 +68,9 @@ func TestS3Backend_ListSecurityValidation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			files, err := backend.List(context.Background(), tt.path)
 
 			if tt.expectError {
@@ -106,7 +108,9 @@ func TestS3Backend_SecurityConsistency(t *testing.T) {
 	}
 
 	for i, maliciousPath := range maliciousPaths {
+		i, maliciousPath := i, maliciousPath // capture loop variables
 		t.Run(fmt.Sprintf("malicious_path_case_%d", i), func(t *testing.T) {
+			t.Parallel()
 			// Test Read method
 			_, readErr := backend.Read(context.Background(), maliciousPath)
 

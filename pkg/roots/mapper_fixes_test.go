@@ -7,6 +7,7 @@ import (
 )
 
 func TestDuplicateVirtualRootPrevention(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		configs     []RootConfig
@@ -99,7 +100,9 @@ func TestDuplicateVirtualRootPrevention(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := NewRootMapper(tt.configs, nil)
 
 			if tt.expectError {
@@ -119,6 +122,7 @@ func TestDuplicateVirtualRootPrevention(t *testing.T) {
 }
 
 func TestS3URIPathConstruction(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	configs := []RootConfig{
@@ -176,7 +180,9 @@ func TestS3URIPathConstruction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			resource, err := mapper.MapURI(context.Background(), tt.virtualURI, "tenant1")
 
 			if tt.expectError {
@@ -211,6 +217,7 @@ func TestS3URIPathConstruction(t *testing.T) {
 }
 
 func TestS3URIEdgeCases(t *testing.T) {
+	t.Parallel()
 	configs := []RootConfig{
 		{
 			Name:     "s3-root",
@@ -261,7 +268,9 @@ func TestS3URIEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			resource, err := mapper.MapURI(context.Background(), tt.virtualURI, "tenant1")
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)

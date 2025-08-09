@@ -55,7 +55,9 @@ func TestFilesystemBackend_WriteSymlinkSecurity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := backend.Write(context.Background(), tt.path, strings.NewReader(tt.content))
 
 			if tt.expectError {
@@ -147,7 +149,9 @@ func TestFilesystemBackend_SymlinkEscapeDetection(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := backend.validatePath(tt.path)
 
 			if tt.expectError {
@@ -221,7 +225,9 @@ func TestFilesystemBackend_NestedSymlinkEscape(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := backend.validatePath(tt.path)
 
 			if tt.expectError && err == nil {
@@ -265,7 +271,9 @@ func TestFilesystemBackend_CreateFileSecure(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			file, err := backend.createFileSecure(tt.path)
 
 			if tt.expectError {
@@ -288,7 +296,9 @@ func TestFilesystemBackend_CreateFileSecure(t *testing.T) {
 				return
 			}
 
-			file.Close()
+			if file != nil {
+				file.Close()
+			}
 
 			// Verify file was created
 			if _, err := os.Stat(tt.path); err != nil {
