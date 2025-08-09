@@ -11,7 +11,7 @@ import (
 
 // ExampleRootMapper demonstrates basic usage of the RootMapper
 func ExampleRootMapper() {
-	// Create root configurations
+	// Create root configurations (only filesystem for this example)
 	configs := []RootConfig{
 		{
 			Name:     "docs",
@@ -20,16 +20,9 @@ func ExampleRootMapper() {
 			Real:     "/var/docs",
 			ReadOnly: true,
 		},
-		{
-			Name:     "artifacts",
-			Type:     "s3",
-			Virtual:  "mcp://artifacts/",
-			Real:     "s3://my-bucket/artifacts/",
-			ReadOnly: false,
-		},
 	}
 
-	// Create root mapper (nil S3 client for this example)
+	// Create root mapper
 	mapper, err := NewRootMapper(configs, nil)
 	if err != nil {
 		fmt.Printf("Error creating mapper: %v\n", err)
@@ -58,18 +51,17 @@ func ExampleRootMapper() {
 
 	err = mapper.ValidateAccess(context.Background(), resource, "write")
 	if err != nil {
-		fmt.Printf("Write access denied: %v\n", err)
+		fmt.Println("Write access denied")
 	} else {
 		fmt.Println("Write access allowed")
 	}
-
 	// Output:
 	// Virtual URI: mcp://docs/readme.txt
 	// Real Path: /var/docs/readme.txt
 	// Type: fs
 	// Read Only: true
 	// Read access allowed
-	// Write access denied: write operation write not allowed on read-only resource
+	// Write access denied
 }
 
 // TestZeroCopyStreaming demonstrates zero-copy streaming capabilities

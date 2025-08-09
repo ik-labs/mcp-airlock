@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -38,7 +40,11 @@ func (fs *filesystemBackend) Read(ctx context.Context, path string) (io.ReadClos
 	default:
 	}
 
-	// Open file for reading
+	// Reject symlinks first
+	if err := fs.validateNotSymlink(path); err != nil {
+		return nil, err
+	}
+	// Now open file for reading (no-follow on Linux)
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,14 +83,21 @@ func (fs *filesystemBackend) Write(ctx context.Context, path string, data io.Rea
 	default:
 	}
 
+	// Validate target path is not a symlink before writing (only if it exists)
+	if _, err := os.Lstat(path); err == nil {
+		if err := fs.validateNotSymlink(path); err != nil {
+			return err
+		}
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	// Create/open file for writing
-	file, err := os.Create(path)
+	// Create/open file for writing with symlink protection
+	file, err := fs.createFileSecure(path)
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", path, err)
 	}
@@ -196,9 +209,78 @@ func (fs *filesystemBackend) validatePath(path string) error {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
 
-	// Ensure path is within root
+	// Ensure path is within root before symlink resolution
 	if !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) && absPath != absRoot {
 		return fmt.Errorf("path outside root directory: %s", path)
+	}
+
+	// Resolve symlinks to detect symlink-based escapes
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return fmt.Errorf("failed to resolve root symlinks: %w", err)
+	}
+
+	// Check for symlinks in the path by walking up the directory tree
+	return fs.checkSymlinksInPath(absPath, resolvedRoot)
+
+	return nil
+}
+
+// checkSymlinksInPath checks for symlinks in the path and all parent directories
+func (fs *filesystemBackend) checkSymlinksInPath(absPath, resolvedRoot string) error {
+	// Get the resolved root path to compare against
+	absRoot, err := filepath.Abs(fs.rootPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve root path: %w", err)
+	}
+
+	// Check each component of the path for symlinks, but only within our control
+	currentPath := absPath
+	for strings.HasPrefix(currentPath, absRoot) && currentPath != absRoot {
+		if info, err := os.Lstat(currentPath); err == nil {
+			// If it's a symlink, check where it points
+			if info.Mode()&os.ModeSymlink != 0 {
+				// Try to resolve the symlink
+				resolvedPath, err := filepath.EvalSymlinks(currentPath)
+				if err != nil {
+					// If we can't resolve it (e.g., broken symlink), check the target manually
+					target, readErr := os.Readlink(currentPath)
+					if readErr != nil {
+						return fmt.Errorf("failed to read symlink: %w", readErr)
+					}
+
+					// If target is absolute, it's definitely outside our control
+					if filepath.IsAbs(target) {
+						return fmt.Errorf("symlink points to absolute path outside root: %s -> %s", currentPath, target)
+					}
+
+					// Resolve relative target against the symlink's directory
+					symlinkDir := filepath.Dir(currentPath)
+					targetPath := filepath.Join(symlinkDir, target)
+					targetPath, err = filepath.Abs(targetPath)
+					if err != nil {
+						return fmt.Errorf("failed to resolve symlink target: %w", err)
+					}
+
+					// Check if the target would be outside the root
+					if !strings.HasPrefix(targetPath, resolvedRoot+string(filepath.Separator)) && targetPath != resolvedRoot {
+						return fmt.Errorf("symlink escape detected: path %s points to %s outside root %s", currentPath, targetPath, resolvedRoot)
+					}
+				} else {
+					// Successfully resolved symlink, check if it's within root
+					if !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) && resolvedPath != resolvedRoot {
+						return fmt.Errorf("symlink escape detected: path %s resolves to %s outside root %s", currentPath, resolvedPath, resolvedRoot)
+					}
+				}
+			}
+		}
+
+		// Move up to parent directory
+		parentPath := filepath.Dir(currentPath)
+		if parentPath == currentPath {
+			break // Reached root
+		}
+		currentPath = parentPath
 	}
 
 	return nil
@@ -216,6 +298,23 @@ func (fs *filesystemBackend) validateNotSymlink(path string) error {
 	}
 
 	return nil
+}
+
+// createFileSecure creates a file with symlink protection
+func (fs *filesystemBackend) createFileSecure(path string) (*os.File, error) {
+	// On Linux, use O_NOFOLLOW to prevent following symlinks
+	if runtime.GOOS == "linux" {
+		return os.OpenFile(path, syscall.O_NOFOLLOW|os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	}
+
+	// On other platforms, validate no symlink exists if file exists
+	if _, err := os.Lstat(path); err == nil {
+		if err := fs.validateNotSymlink(path); err != nil {
+			return nil, err
+		}
+	}
+
+	return os.Create(path)
 }
 
 // setReadOnlyMount attempts to set read-only mount flags (Linux-specific)

@@ -49,6 +49,11 @@ func NewS3Backend(client S3Client, s3URI string, readOnly bool) Backend {
 
 // Read returns a reader for the S3 object
 func (s3b *s3Backend) Read(ctx context.Context, path string) (io.ReadCloser, error) {
+	// Validate path before building key
+	if err := s3b.validatePath(path); err != nil {
+		return nil, err
+	}
+
 	key := s3b.buildKey(path)
 
 	// Validate key format
@@ -77,6 +82,11 @@ func (s3b *s3Backend) Write(ctx context.Context, path string, data io.Reader) er
 		return fmt.Errorf("write operation not allowed on read-only S3 backend")
 	}
 
+	// Validate path before building key
+	if err := s3b.validatePath(path); err != nil {
+		return err
+	}
+
 	key := s3b.buildKey(path)
 
 	// Validate key format
@@ -99,7 +109,18 @@ func (s3b *s3Backend) Write(ctx context.Context, path string, data io.Reader) er
 
 // List returns a list of objects with the given prefix
 func (s3b *s3Backend) List(ctx context.Context, path string) ([]FileInfo, error) {
+	// Validate path before building key (to catch absolute paths before they're trimmed)
+	if err := s3b.validatePath(path); err != nil {
+		return nil, err
+	}
+
 	prefix := s3b.buildKey(path)
+
+	// Validate final key format for additional security
+	if err := s3b.validateKey(prefix); err != nil {
+		return nil, err
+	}
+
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
@@ -177,6 +198,11 @@ func (s3b *s3Backend) List(ctx context.Context, path string) ([]FileInfo, error)
 
 // Stat returns information about a specific S3 object
 func (s3b *s3Backend) Stat(ctx context.Context, path string) (*FileInfo, error) {
+	// Validate path before building key
+	if err := s3b.validatePath(path); err != nil {
+		return nil, err
+	}
+
 	key := s3b.buildKey(path)
 
 	// Validate key format
@@ -219,6 +245,29 @@ func (s3b *s3Backend) Stat(ctx context.Context, path string) (*FileInfo, error) 
 		ModTime: modTime,
 		IsDir:   false,
 	}, nil
+}
+
+// validatePath validates the input path before key construction
+func (s3b *s3Backend) validatePath(path string) error {
+	// Check for path traversal attempts
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path traversal attempt in S3 path: %s", path)
+	}
+
+	// Check for absolute paths (before buildKey trims them)
+	if strings.HasPrefix(path, "/") {
+		return fmt.Errorf("absolute paths not allowed in S3 path: %s", path)
+	}
+
+	// Check for invalid characters
+	invalidChars := []string{"\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08", "\x09", "\x0A", "\x0B", "\x0C", "\x0D", "\x0E", "\x0F"}
+	for _, char := range invalidChars {
+		if strings.Contains(path, char) {
+			return fmt.Errorf("invalid character in S3 path: %s", path)
+		}
+	}
+
+	return nil
 }
 
 // buildKey constructs the S3 key from the path

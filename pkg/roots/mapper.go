@@ -75,6 +75,11 @@ func NewRootMapper(configs []RootConfig, s3Client S3Client) (RootMapper, error) 
 			return nil, fmt.Errorf("invalid root config %s: %w", config.Name, err)
 		}
 
+		// Check for duplicate virtual roots
+		if _, exists := rm.roots[config.Virtual]; exists {
+			return nil, fmt.Errorf("duplicate virtual root: %s (already configured)", config.Virtual)
+		}
+
 		rm.roots[config.Virtual] = &config
 
 		// Create appropriate backend
@@ -187,8 +192,24 @@ func (rm *rootMapper) validatePath(relativePath, realRoot string) (string, error
 		return "", fmt.Errorf("path traversal attempt detected: %s", relativePath)
 	}
 
-	// Build the real path
-	realPath := filepath.Join(realRoot, cleaned)
+	// Build the real path - handle S3 URIs differently
+	var realPath string
+	if strings.HasPrefix(realRoot, "s3://") {
+		// For S3 URIs, don't use filepath.Join as it corrupts the URI
+		if cleaned == "." || cleaned == "" {
+			realPath = realRoot
+		} else {
+			// Ensure proper S3 path construction
+			realPath = strings.TrimSuffix(realRoot, "/") + "/" + cleaned
+		}
+
+		// For S3 URIs, we can't use filepath.Abs, so just return the constructed path
+		// The S3 backend will handle its own validation
+		return realPath, nil
+	}
+
+	// For filesystem paths, use standard path handling
+	realPath = filepath.Join(realRoot, cleaned)
 
 	// Ensure the resolved path is still within the root directory
 	absRoot, err := filepath.Abs(realRoot)

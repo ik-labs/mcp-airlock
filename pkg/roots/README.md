@@ -26,6 +26,9 @@ This package implements virtual root mapping with comprehensive security control
 
 - **Path Traversal Prevention**: Blocks `../`, absolute paths, and other traversal attempts
 - **Symlink Denial**: Rejects symbolic links to prevent privilege escalation
+- **Symlink Escape Detection**: Resolves symlinks to detect escapes via nested symlinks
+- **Write-Through Symlink Prevention**: Blocks writing through symlinks that could escape root
+- **Linux O_NOFOLLOW Support**: Uses `O_NOFOLLOW` flag on Linux to prevent symlink following during file creation
 - **Root Containment**: Ensures all paths remain within configured root directories
 - **URI Validation**: Validates virtual URI format and schemes
 - **Read-Only Enforcement**: Prevents write operations on read-only resources
@@ -108,6 +111,13 @@ _, err = io.Copy(destination, reader)
 
 ## Configuration
 
+The package validates configurations to prevent common issues:
+
+- **Duplicate Virtual Roots**: Prevents silent overwrites by enforcing unique virtual root keys
+- **Backend Type Validation**: Ensures only supported backend types are used
+- **URI Format Validation**: Validates virtual URI format and schemes
+- **S3 URI Handling**: Properly handles S3 URIs without corrupting them with filesystem path operations
+
 ### Filesystem Backend
 
 ```yaml
@@ -146,6 +156,8 @@ The package implements multiple layers of path traversal prevention:
 3. **Post-validation**: Checks for remaining `..` sequences after cleaning
 4. **Root Containment**: Ensures resolved paths remain within the configured root
 5. **Symlink Denial**: Rejects symbolic links using `os.Lstat`
+6. **Symlink Resolution**: Uses `filepath.EvalSymlinks` to detect symlink-based escapes
+7. **Write Protection**: Validates target paths before writing to prevent symlink attacks
 
 ### Read-Only Enforcement
 
@@ -208,6 +220,25 @@ This implementation satisfies the following requirements:
 - **R4.3**: Path traversal attack prevention
 - **R4.4**: Virtual URI to real location mapping
 - **R4.5**: Multiple root type support (filesystem, S3)
+
+## Recent Improvements
+
+### Bug Fixes
+
+- **Duplicate Virtual Root Prevention**: Added validation to prevent silent overwrites when multiple configurations use the same virtual root key
+- **S3 URI Path Construction**: Fixed issue where `filepath.Join` was corrupting S3 URIs (e.g., `s3://bucket/prefix` becoming `s3:/bucket/prefix`)
+- **S3 List Security Gap**: Fixed missing path validation in S3 List method that could allow malicious paths to bypass security checks
+- **Enhanced Symlink Security**: Improved symlink detection and prevention in write operations
+- **Cross-Platform Compatibility**: Better handling of platform-specific path behaviors
+
+### Security Enhancements
+
+- **Write-Through Symlink Protection**: Prevents writing through symlinks that could escape the root directory
+- **Linux O_NOFOLLOW Support**: Uses `O_NOFOLLOW` flag on Linux for additional symlink protection
+- **Nested Symlink Detection**: Detects and prevents complex symlink escape chains
+- **Comprehensive Path Validation**: Multi-layer validation with symlink resolution
+- **Consistent S3 Security**: All S3 backend methods now have consistent path validation before key construction
+- **Pre-Build Validation**: Path validation occurs before S3 key construction to catch absolute paths before they're trimmed
 
 ## Future Enhancements
 
