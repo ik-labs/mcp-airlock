@@ -208,7 +208,6 @@ func (fs *filesystemBackend) validatePath(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
-
 	// Ensure path is within root before symlink resolution
 	if !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) && absPath != absRoot {
 		return fmt.Errorf("path outside root directory: %s", path)
@@ -222,21 +221,13 @@ func (fs *filesystemBackend) validatePath(path string) error {
 
 	// Check for symlinks in the path by walking up the directory tree
 	return fs.checkSymlinksInPath(absPath, resolvedRoot)
-
-	return nil
 }
 
 // checkSymlinksInPath checks for symlinks in the path and all parent directories
 func (fs *filesystemBackend) checkSymlinksInPath(absPath, resolvedRoot string) error {
-	// Get the resolved root path to compare against
-	absRoot, err := filepath.Abs(fs.rootPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve root path: %w", err)
-	}
-
 	// Check each component of the path for symlinks, but only within our control
 	currentPath := absPath
-	for strings.HasPrefix(currentPath, absRoot) && currentPath != absRoot {
+	for strings.HasPrefix(currentPath, resolvedRoot) && currentPath != resolvedRoot {
 		if info, err := os.Lstat(currentPath); err == nil {
 			// If it's a symlink, check where it points
 			if info.Mode()&os.ModeSymlink != 0 {
@@ -315,20 +306,4 @@ func (fs *filesystemBackend) createFileSecure(path string) (*os.File, error) {
 	}
 
 	return os.Create(path)
-}
-
-// setReadOnlyMount attempts to set read-only mount flags (Linux-specific)
-func (fs *filesystemBackend) setReadOnlyMount() error {
-	if !fs.readOnly {
-		return nil
-	}
-
-	// This would require root privileges and is typically done at the container/mount level
-	// For demonstration, we'll use syscall.Mount with MS_RDONLY flag
-	// In practice, this should be handled by the container runtime or init system
-
-	// Note: This is a placeholder - actual implementation would require careful
-	// consideration of mount namespaces and privileges
-	// The syscall constants are Linux-specific and not available on all platforms
-	return fmt.Errorf("read-only mount enforcement should be handled at container/mount level")
 }

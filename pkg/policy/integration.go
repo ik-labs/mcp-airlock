@@ -151,6 +151,7 @@ func (pi *PolicyIntegration) ExtractToolAndResource(req *MCPRequest) (string, st
 func (pi *PolicyIntegration) processAllowedRequest(ctx context.Context, req *MCPRequest, reqCtx *RequestContext) (*MCPResponse, error) {
 	// Simulate processing the allowed request
 	// In a real implementation, this would proxy to the upstream MCP server
+	_ = ctx // Context would be used for upstream server communication
 
 	pi.logger.Info("Processing allowed request",
 		zap.String("request_id", reqCtx.RequestID),

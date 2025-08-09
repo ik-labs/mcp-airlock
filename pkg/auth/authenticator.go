@@ -3,11 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"golang.org/x/sync/singleflight"
 	"go.uber.org/zap"
 )
 
@@ -39,12 +37,7 @@ type Authenticator struct {
 	verifier *oidc.IDTokenVerifier
 	logger   *zap.Logger
 
-	// JWKS cache with mutex protection
-	jwksMu        sync.RWMutex
-	jwksLastFetch time.Time
-
-	// Singleflight for cache miss protection
-	sf singleflight.Group
+	// JWKS cache fields would go here when implemented
 
 	// Background refresh control
 	refreshCtx    context.Context

@@ -55,7 +55,7 @@ func TestDuplicateVirtualRootPrevention(t *testing.T) {
 			errorMsg:    "duplicate virtual root",
 		},
 		{
-			name: "case sensitive virtual roots",
+			name: "case insensitive duplicate detection",
 			configs: []RootConfig{
 				{
 					Name:     "docs-lower",
@@ -67,12 +67,34 @@ func TestDuplicateVirtualRootPrevention(t *testing.T) {
 				{
 					Name:     "docs-upper",
 					Type:     "fs",
-					Virtual:  "mcp://DOCS/", // Different case - should be allowed
+					Virtual:  "mcp://DOCS/", // Different case - should be detected as duplicate
 					Real:     "/var/docs2",
 					ReadOnly: false,
 				},
 			},
-			expectError: false,
+			expectError: true,
+			errorMsg:    "duplicate virtual root",
+		},
+		{
+			name: "trailing slash normalization",
+			configs: []RootConfig{
+				{
+					Name:     "docs-no-slash",
+					Type:     "fs",
+					Virtual:  "mcp://docs",
+					Real:     "/var/docs1",
+					ReadOnly: true,
+				},
+				{
+					Name:     "docs-with-slash",
+					Type:     "fs",
+					Virtual:  "mcp://docs/", // Trailing slash - should be detected as duplicate
+					Real:     "/var/docs2",
+					ReadOnly: false,
+				},
+			},
+			expectError: true,
+			errorMsg:    "duplicate virtual root",
 		},
 	}
 

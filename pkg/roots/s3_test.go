@@ -135,10 +135,6 @@ func (m *mockS3Client) setObject(key string, content []byte) {
 	m.objects[key] = content
 }
 
-func (m *mockS3Client) setError(key string, err error) {
-	m.errors[key] = err
-}
-
 func TestS3Backend_Read(t *testing.T) {
 	mockClient := newMockS3Client()
 

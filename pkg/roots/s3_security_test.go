@@ -2,6 +2,7 @@ package roots
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -104,8 +105,8 @@ func TestS3Backend_SecurityConsistency(t *testing.T) {
 		string(make([]byte, 1025)), // Too long
 	}
 
-	for _, maliciousPath := range maliciousPaths {
-		t.Run("malicious_path_"+maliciousPath[:min(len(maliciousPath), 20)], func(t *testing.T) {
+	for i, maliciousPath := range maliciousPaths {
+		t.Run(fmt.Sprintf("malicious_path_case_%d", i), func(t *testing.T) {
 			// Test Read method
 			_, readErr := backend.Read(context.Background(), maliciousPath)
 
@@ -182,12 +183,4 @@ func (t *trackingMockS3Client) ListObjectsV2(ctx context.Context, params *s3.Lis
 // Helper function for string contains check
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
-}
-
-// Helper function for min
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

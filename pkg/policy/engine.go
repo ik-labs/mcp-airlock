@@ -236,7 +236,7 @@ func (pe *OPAEngine) Evaluate(ctx context.Context, input *PolicyInput) (*PolicyD
 	}
 
 	// Process results
-	decision := pe.processResults(results, input)
+	decision := pe.processResults(results)
 
 	// Cache the decision
 	pe.cache.Set(input.Tenant, cacheKey, decision)
@@ -245,7 +245,7 @@ func (pe *OPAEngine) Evaluate(ctx context.Context, input *PolicyInput) (*PolicyD
 }
 
 // processResults converts OPA evaluation results to PolicyDecision
-func (pe *OPAEngine) processResults(results rego.ResultSet, input *PolicyInput) *PolicyDecision {
+func (pe *OPAEngine) processResults(results rego.ResultSet) *PolicyDecision {
 	decision := &PolicyDecision{
 		Allow:    false,
 		Reason:   "policy denied request",

@@ -1,97 +1,13 @@
 package auth
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap/zaptest"
 )
-
-// testKeyPair holds RSA key pair for testing
-type testKeyPair struct {
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
-	keyID      string
-}
-
-func generateTestKeyPair(t testing.TB) *testKeyPair {
-	t.Helper()
-
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("Failed to generate RSA key: %v", err)
-	}
-
-	return &testKeyPair{
-		privateKey: privateKey,
-		publicKey:  &privateKey.PublicKey,
-		keyID:      "test-key-1",
-	}
-}
-
-// createTestJWT creates a JWT token for testing
-func (kp *testKeyPair) createTestJWT(t testing.TB, claims jwt.MapClaims) string {
-	t.Helper()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = kp.keyID
-
-	tokenString, err := token.SignedString(kp.privateKey)
-	if err != nil {
-		t.Fatalf("Failed to sign JWT: %v", err)
-	}
-
-	return tokenString
-}
-
-// mockOIDCServer creates a mock OIDC server for testing
-func createMockOIDCServer(t testing.TB, keyPair *testKeyPair) *httptest.Server {
-	t.Helper()
-
-	mux := http.NewServeMux()
-
-	// OIDC discovery endpoint
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		config := map[string]interface{}{
-			"issuer":                                "http://" + r.Host,
-			"jwks_uri":                              "http://" + r.Host + "/jwks",
-			"supported_signing_algs":                []string{"RS256"},
-			"id_token_signing_alg_values_supported": []string{"RS256"},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(config)
-	})
-
-	// JWKS endpoint
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		// Simple JWK representation
-		jwks := map[string]interface{}{
-			"keys": []map[string]interface{}{
-				{
-					"kty": "RSA",
-					"kid": keyPair.keyID,
-					"use": "sig",
-					"alg": "RS256",
-					"n":   "test-modulus", // Simplified for testing
-					"e":   "AQAB",
-				},
-			},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
-	})
-
-	return httptest.NewServer(mux)
-}
 
 func TestAuthenticator_ExtractClaims(t *testing.T) {
 	logger := zaptest.NewLogger(t)

@@ -75,9 +75,15 @@ func NewRootMapper(configs []RootConfig, s3Client S3Client) (RootMapper, error) 
 			return nil, fmt.Errorf("invalid root config %s: %w", config.Name, err)
 		}
 
-		// Check for duplicate virtual roots
-		if _, exists := rm.roots[config.Virtual]; exists {
-			return nil, fmt.Errorf("duplicate virtual root: %s (already configured)", config.Virtual)
+		// Normalize virtual root key for consistent comparison
+		normalizedVirtual := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(config.Virtual, "/")))
+
+		// Check for duplicate virtual roots using normalized key
+		for existingVirtual := range rm.roots {
+			existingNormalized := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(existingVirtual, "/")))
+			if normalizedVirtual == existingNormalized {
+				return nil, fmt.Errorf("duplicate virtual root: %s conflicts with existing %s", config.Virtual, existingVirtual)
+			}
 		}
 
 		rm.roots[config.Virtual] = &config
