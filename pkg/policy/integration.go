@@ -53,29 +53,27 @@ func NewPolicyIntegration(middleware *PolicyMiddleware, logger *zap.Logger) *Pol
 
 // ProcessRequest processes an MCP request with policy enforcement
 func (pi *PolicyIntegration) ProcessRequest(ctx context.Context, req *MCPRequest, auth *AuthContext) (*MCPResponse, error) {
-    requestID := req.ID
-    if requestID == "" {
-        requestID = fmt.Sprintf("req-%d", time.Now().UnixNano())
-        req.ID = requestID  // ensure downstream code & response share the same ID
-    }
+	requestID := req.ID
+	if requestID == "" {
+		requestID = fmt.Sprintf("req-%d", time.Now().UnixNano())
+		req.ID = requestID // ensure downstream code & response share the same ID
+	}
 
-    // Extract tool and resource from request
-    tool, resource := pi.extractToolAndResource(req)
+	// Extract tool and resource from request
+	tool, resource := pi.ExtractToolAndResource(req)
 
-    // Create request context for policy evaluation
-    reqCtx := &RequestContext{
-        Subject:   auth.Subject,
-        Tenant:    auth.Tenant,
-        Groups:    auth.Groups,
-        Tool:      tool,
-        Resource:  resource,
-        Method:    req.Method,
-        Headers:   req.Headers,
-        RequestID: requestID,
-        Timestamp: time.Now(),
-    }
-    // ... rest of the function ...
-}
+	// Create request context for policy evaluation
+	reqCtx := &RequestContext{
+		Subject:   auth.Subject,
+		Tenant:    auth.Tenant,
+		Groups:    auth.Groups,
+		Tool:      tool,
+		Resource:  resource,
+		Method:    req.Method,
+		Headers:   req.Headers,
+		RequestID: requestID,
+		Timestamp: time.Now(),
+	}
 
 	// Evaluate policy
 	result := pi.middleware.EvaluateRequest(ctx, reqCtx)
@@ -128,8 +126,8 @@ func (pi *PolicyIntegration) ProcessRequest(ctx context.Context, req *MCPRequest
 	return pi.processAllowedRequest(ctx, req, reqCtx)
 }
 
-// extractToolAndResource extracts tool and resource information from MCP request
-func (pi *PolicyIntegration) extractToolAndResource(req *MCPRequest) (string, string) {
+// ExtractToolAndResource extracts tool and resource information from MCP request
+func (pi *PolicyIntegration) ExtractToolAndResource(req *MCPRequest) (string, string) {
 	// Extract tool from method (e.g., "tools/call" -> "call")
 	tool := req.Method
 	if req.Method == "tools/call" {

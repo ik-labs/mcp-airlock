@@ -13,12 +13,12 @@ import (
 type ServerAdapter interface {
 	// Start starts the MCP server with the given transport
 	Start(ctx context.Context, transport mcp.Transport) error
-	
+
 	// Stop gracefully stops the MCP server
 	Stop(ctx context.Context) error
-	
+
 	// RegisterHandlers registers MCP message handlers
-	RegisterHandlers(handlers map[string]mcp.RequestHandler) error
+	RegisterHandlers(handlers map[string]MessageHandler) error
 }
 
 // ClientAdapter provides an interface for MCP client operations
@@ -26,10 +26,10 @@ type ServerAdapter interface {
 type ClientAdapter interface {
 	// Connect establishes a connection to an upstream MCP server
 	Connect(ctx context.Context, transport mcp.Transport) error
-	
+
 	// Disconnect closes the connection to the upstream server
 	Disconnect(ctx context.Context) error
-	
+
 	// SendRequest sends a request to the upstream server
 	SendRequest(ctx context.Context, method string, params interface{}) (interface{}, error)
 }
@@ -38,10 +38,10 @@ type ClientAdapter interface {
 type TransportFactory interface {
 	// CreateHTTPTransport creates an HTTP/SSE transport
 	CreateHTTPTransport(addr string) (mcp.Transport, error)
-	
+
 	// CreateStdioTransport creates a stdio transport for subprocess communication
 	CreateStdioTransport(cmd []string, env map[string]string) (mcp.Transport, error)
-	
+
 	// CreateUnixTransport creates a Unix socket transport
 	CreateUnixTransport(socketPath string) (mcp.Transport, error)
 }
@@ -50,7 +50,7 @@ type TransportFactory interface {
 type MessageHandler interface {
 	// HandleRequest processes an incoming MCP request
 	HandleRequest(ctx context.Context, method string, params interface{}) (interface{}, error)
-	
+
 	// HandleNotification processes an incoming MCP notification
 	HandleNotification(ctx context.Context, method string, params interface{}) error
 }
@@ -65,13 +65,13 @@ type StreamHandler interface {
 type ConnectionManager interface {
 	// AddConnection adds a new client connection
 	AddConnection(ctx context.Context, connID string, client ClientAdapter) error
-	
+
 	// RemoveConnection removes a client connection
 	RemoveConnection(ctx context.Context, connID string) error
-	
+
 	// GetConnection retrieves a client connection by ID
 	GetConnection(ctx context.Context, connID string) (ClientAdapter, error)
-	
+
 	// ListConnections returns all active connection IDs
 	ListConnections(ctx context.Context) ([]string, error)
 }

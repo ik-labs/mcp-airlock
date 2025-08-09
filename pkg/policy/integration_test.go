@@ -268,7 +268,7 @@ func TestPolicyIntegration_ExtractToolAndResource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool, resource := integration.extractToolAndResource(tt.req)
+			tool, resource := integration.ExtractToolAndResource(tt.req)
 
 			if tool != tt.expectedTool {
 				t.Errorf("expected tool %q, got %q", tt.expectedTool, tool)
