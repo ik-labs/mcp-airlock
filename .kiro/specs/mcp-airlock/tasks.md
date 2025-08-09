@@ -73,8 +73,8 @@
   - Write performance benchmarks targeting sub-millisecond policy evaluation
   - _Requirements: R14.1, R10.2, R6.5_
 
-- [ ] 5. Root virtualization and access control
-- [ ] 5.1 Implement virtual root mapping with Go path security
+- [-] 5. Root virtualization and access control
+- [x] 5.1 Implement virtual root mapping with Go path security
   - Create RootMapper using filepath.Clean and symlink validation
   - Add zero-copy streaming for S3 and filesystem resources with io.Reader
   - Implement path sandboxing with optional openat2 syscall on Linux
