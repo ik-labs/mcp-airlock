@@ -29,22 +29,22 @@
   - Write integration tests with mock upstream MCP server
   - _Requirements: R16.4, R9.2, R14.2_
 
-- [ ] 3. Authentication and JWT validation system
-- [ ] 3.1 Implement OIDC/JWT authentication with background refresh
+- [x] 3. Authentication and JWT validation system
+- [x] 3.1 Implement OIDC/JWT authentication with background refresh
   - Create Authenticator with context-aware background JWKS refresh goroutine
   - Implement JWT validation with pure Go clock skew handling (±2m)
   - Add tenant and group extraction with singleflight for cache miss protection
   - Write unit tests with deterministic time mocking and race detection
   - _Requirements: R2.1, R2.2, R12.2, R10.1_
 
-- [ ] 3.2 Add authentication middleware to MCP server
+- [x] 3.2 Add authentication middleware to MCP server
   - Integrate authentication layer with MCP server request processing
   - Implement session management and authentication context propagation
   - Add proper HTTP 401 responses with WWW-Authenticate headers
   - Write integration tests for authenticated and unauthenticated requests
   - _Requirements: R1.4, R2.1, R2.2_
 
-- [ ] 3.3 Implement rate limiting with golang.org/x/time/rate
+- [x] 3.3 Implement rate limiting with golang.org/x/time/rate
   - Create RateLimiter using rate.Limiter with singleflight for thundering herd protection
   - Add per-token limits (200 req/min = ~3.33 req/sec) with sync.Map storage
   - Implement brute-force protection with temporary throttling and exponential backoff
