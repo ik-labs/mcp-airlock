@@ -2,6 +2,7 @@ package roots
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+)
+
+// Error types for better test robustness
+var (
+	ErrReadOnlyFilesystem = errors.New("write operation not allowed on read-only filesystem")
+	ErrPathTraversal      = errors.New("path traversal attempt detected")
+	ErrSymlinkDetected    = errors.New("symlink detected in path")
 )
 
 // filesystemBackend implements Backend for local filesystem
@@ -71,7 +79,7 @@ func (fs *filesystemBackend) Read(ctx context.Context, path string) (io.ReadClos
 func (fs *filesystemBackend) Write(ctx context.Context, path string, data io.Reader) error {
 	// R4.2: Mount-level read-only enforcement
 	if fs.readOnly || fs.mountLevelRO {
-		return fmt.Errorf("write operation not allowed on read-only filesystem (mount-level enforcement)")
+		return fmt.Errorf("%w (mount-level enforcement)", ErrReadOnlyFilesystem)
 	}
 
 	// Validate path is within root and follows security constraints
@@ -204,9 +212,12 @@ func (fs *filesystemBackend) validatePath(path string) error {
 	// R4.2: Use filepath.Clean to normalize path first
 	cleanPath := filepath.Clean(path)
 
-	// R4.2: Deny any path containing .. after cleaning
-	if strings.Contains(cleanPath, "..") {
-		return fmt.Errorf("path traversal attempt detected after cleaning: %s", path)
+	// R4.2: Deny any path component that exactly equals ".." after cleaning
+	pathComponents := strings.Split(cleanPath, string(filepath.Separator))
+	for _, component := range pathComponents {
+		if component == ".." {
+			return fmt.Errorf("%w after cleaning: %s", ErrPathTraversal, path)
+		}
 	}
 
 	// Get absolute paths
@@ -315,7 +326,7 @@ func (fs *filesystemBackend) checkSymlinksInPathSandboxed(absPath, absRoot strin
 	for strings.HasPrefix(currentPath, absRoot) && currentPath != absRoot {
 		if info, err := os.Lstat(currentPath); err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("symlink detected in path (denied by sandboxing): %s", currentPath)
+				return fmt.Errorf("%w (denied by sandboxing): %s", ErrSymlinkDetected, currentPath)
 			}
 		}
 

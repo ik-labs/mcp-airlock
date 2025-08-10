@@ -2,6 +2,7 @@ package roots
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -9,6 +10,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+)
+
+// Error types for better test robustness
+var (
+	ErrUnauthorizedScheme = errors.New("unauthorized URI scheme")
+	ErrReadOnlyResource   = errors.New("write operation not allowed on read-only resource")
 )
 
 // RootMapper handles virtual URI to real path mapping with security controls
@@ -117,10 +124,10 @@ func (rm *rootMapper) MapURI(ctx context.Context, virtualURI string, tenant stri
 	}
 
 	// Validate URI scheme whitelist (R19.1, R19.2)
+	parsedURI.Scheme = strings.ToLower(parsedURI.Scheme)
 	if err := rm.validateURIScheme(parsedURI); err != nil {
 		return nil, fmt.Errorf("URI scheme validation failed: %w", err)
 	}
-
 	// Find matching root configuration
 	var rootConfig *RootConfig
 	var relativePath string
@@ -162,7 +169,7 @@ func (rm *rootMapper) MapURI(ctx context.Context, virtualURI string, tenant stri
 func (rm *rootMapper) ValidateAccess(ctx context.Context, resource *MappedResource, operation string) error {
 	// Check read-only enforcement
 	if resource.ReadOnly && isWriteOperation(operation) {
-		return fmt.Errorf("write operation %s not allowed on read-only resource", operation)
+		return fmt.Errorf("%w %s", ErrReadOnlyResource, operation)
 	}
 
 	// Additional validation can be added here (e.g., tenant-specific checks)
@@ -289,7 +296,7 @@ func (rm *rootMapper) validateURIScheme(parsedURI *url.URL) error {
 
 	// Check if scheme is allowed
 	if !allowedSchemes[parsedURI.Scheme] {
-		return fmt.Errorf("unauthorized scheme '%s': only mcp:// schemes are allowed", parsedURI.Scheme)
+		return fmt.Errorf("%w '%s': only mcp:// schemes are allowed", ErrUnauthorizedScheme, parsedURI.Scheme)
 	}
 
 	// For mcp:// scheme, validate against configured virtual roots

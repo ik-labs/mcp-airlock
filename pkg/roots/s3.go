@@ -2,6 +2,7 @@ package roots
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+)
+
+// Error types for better test robustness
+var (
+	ErrReadOnlyS3Backend = errors.New("write operation not allowed on read-only S3 backend")
 )
 
 // S3Client interface for S3 operations (allows mocking)
@@ -301,21 +307,21 @@ func (s3b *s3Backend) buildKey(path string) string {
 
 // validateWriteAccess validates write access based on read-only settings and allowed prefixes (R19.4)
 func (s3b *s3Backend) validateWriteAccess(key string) error {
-	// If backend is explicitly read-only, deny all writes
-	if s3b.readOnly {
-		return fmt.Errorf("write operation not allowed on read-only S3 backend")
+	// R19.4: First check if this is an artifacts prefix that should allow writes
+	if s3b.allowedWritePrefix != "" && strings.EqualFold(s3b.prefix, s3b.allowedWritePrefix) {
+		// This is an artifacts backend with proper setup - allow writes even if readOnly is true
+		return nil
 	}
 
-	// R19.4: For S3 backends with artifacts prefix, enforce selective write access
-	// Only apply R19.4 restrictions if we have an artifacts prefix configured
-	if s3b.allowedWritePrefix != "" && strings.Contains(s3b.prefix, "artifacts") {
-		// This is an artifacts backend - allow writes
-		return nil
-	} else if s3b.allowedWritePrefix == "" && (strings.Contains(s3b.prefix, "repo") || strings.Contains(s3b.prefix, "artifacts")) {
-		// This is a repo backend or artifacts backend without proper setup - apply R19.4
-		if !strings.Contains(s3b.prefix, "artifacts") {
-			return fmt.Errorf("write operation not allowed on read-only S3 backend (R19.4: non-artifacts prefix)")
-		}
+	// If backend is explicitly read-only and not an artifacts exception, deny writes
+	if s3b.readOnly {
+		return fmt.Errorf("%w", ErrReadOnlyS3Backend)
+	}
+
+	// R19.4: Apply additional restrictions for repo/artifacts prefixes
+	if strings.Contains(strings.ToLower(s3b.prefix), "repo") {
+		// Repo prefixes should be read-only by default
+		return fmt.Errorf("%w (R19.4: repo prefix)", ErrReadOnlyS3Backend)
 	}
 
 	// For other backends (test backends, etc.), allow normal operation

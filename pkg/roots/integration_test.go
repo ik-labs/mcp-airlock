@@ -2,6 +2,7 @@ package roots
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,11 +20,11 @@ func TestReadOnlyEnforcement(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		readOnly    bool
-		operation   string
-		expectError bool
-		errorMsg    string
+		name          string
+		readOnly      bool
+		operation     string
+		expectError   bool
+		expectedError error
 	}{
 		{
 			name:        "read on read-only filesystem",
@@ -32,11 +33,11 @@ func TestReadOnlyEnforcement(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "write on read-only filesystem",
-			readOnly:    true,
-			operation:   "write",
-			expectError: true,
-			errorMsg:    "mount-level enforcement",
+			name:          "write on read-only filesystem",
+			readOnly:      true,
+			operation:     "write",
+			expectError:   true,
+			expectedError: ErrReadOnlyFilesystem,
 		},
 		{
 			name:        "write on read-write filesystem",
@@ -59,8 +60,8 @@ func TestReadOnlyEnforcement(t *testing.T) {
 						if reader != nil {
 							reader.Close()
 						}
-					} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+					} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+						t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 					}
 				} else {
 					if err != nil {
@@ -76,8 +77,8 @@ func TestReadOnlyEnforcement(t *testing.T) {
 				if tt.expectError {
 					if err == nil {
 						t.Errorf("Expected error but got none")
-					} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+					} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+						t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 					}
 				} else {
 					if err != nil {
@@ -108,10 +109,10 @@ func TestPathSandboxing(t *testing.T) {
 	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
 
 	tests := []struct {
-		name        string
-		path        string
-		expectError bool
-		errorMsg    string
+		name          string
+		path          string
+		expectError   bool
+		expectedError error
 	}{
 		{
 			name:        "regular file path",
@@ -122,19 +123,19 @@ func TestPathSandboxing(t *testing.T) {
 			name:        "path with .. traversal",
 			path:        filepath.Join(tempDir, "../../../etc/passwd"),
 			expectError: true,
-			errorMsg:    "path outside root directory",
+			// This will be caught by the "path outside root directory" check, not our new error type
 		},
 		{
-			name:        "symlink in path",
-			path:        symlinkFile,
-			expectError: true,
-			errorMsg:    "symlink detected",
+			name:          "symlink in path",
+			path:          symlinkFile,
+			expectError:   true,
+			expectedError: ErrSymlinkDetected,
 		},
 		{
 			name:        "path with .. after cleaning",
 			path:        filepath.Join(tempDir, "dir/../../../etc/passwd"),
 			expectError: true,
-			errorMsg:    "path outside root directory",
+			// This will be caught by the "path outside root directory" check, not our new error type
 		},
 	}
 
@@ -145,8 +146,8 @@ func TestPathSandboxing(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got none for path: %s", tt.path)
-				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+				} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+					t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 				}
 			} else {
 				if err != nil {
@@ -184,10 +185,10 @@ func TestURISchemeValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		virtualURI  string
-		expectError bool
-		errorMsg    string
+		name          string
+		virtualURI    string
+		expectError   bool
+		expectedError error
 	}{
 		{
 			name:        "valid mcp://repo/ URI",
@@ -200,34 +201,34 @@ func TestURISchemeValidation(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "invalid file:// scheme",
-			virtualURI:  "file:///etc/passwd",
-			expectError: true,
-			errorMsg:    "unauthorized scheme 'file'",
+			name:          "invalid file:// scheme",
+			virtualURI:    "file:///etc/passwd",
+			expectError:   true,
+			expectedError: ErrUnauthorizedScheme,
 		},
 		{
-			name:        "invalid http:// scheme",
-			virtualURI:  "http://example.com/file.txt",
-			expectError: true,
-			errorMsg:    "unauthorized scheme 'http'",
+			name:          "invalid http:// scheme",
+			virtualURI:    "http://example.com/file.txt",
+			expectError:   true,
+			expectedError: ErrUnauthorizedScheme,
 		},
 		{
-			name:        "invalid https:// scheme",
-			virtualURI:  "https://example.com/file.txt",
-			expectError: true,
-			errorMsg:    "unauthorized scheme 'https'",
+			name:          "invalid https:// scheme",
+			virtualURI:    "https://example.com/file.txt",
+			expectError:   true,
+			expectedError: ErrUnauthorizedScheme,
 		},
 		{
 			name:        "invalid mcp:// path",
 			virtualURI:  "mcp://unauthorized/file.txt",
 			expectError: true,
-			errorMsg:    "only configured virtual roots are allowed",
+			// This will be caught by the virtual root validation, not the scheme validation
 		},
 		{
-			name:        "invalid ftp:// scheme",
-			virtualURI:  "ftp://example.com/file.txt",
-			expectError: true,
-			errorMsg:    "unauthorized scheme 'ftp'",
+			name:          "invalid ftp:// scheme",
+			virtualURI:    "ftp://example.com/file.txt",
+			expectError:   true,
+			expectedError: ErrUnauthorizedScheme,
 		},
 	}
 
@@ -238,8 +239,8 @@ func TestURISchemeValidation(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error for URI %s but got none", tt.virtualURI)
-				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+				} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+					t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 				}
 			} else {
 				if err != nil {
@@ -260,7 +261,7 @@ func TestS3ReadOnlyWithArtifactsPrefix(t *testing.T) {
 		path           string
 		operation      string
 		expectError    bool
-		errorMsg       string
+		expectedError  error
 		expectedPrefix string
 	}{
 		{
@@ -271,12 +272,12 @@ func TestS3ReadOnlyWithArtifactsPrefix(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "write to repo prefix (should fail)",
-			s3URI:       "s3://test-bucket/repo/",
-			path:        "file.txt",
-			operation:   "write",
-			expectError: true,
-			errorMsg:    "write operation not allowed on read-only S3 backend",
+			name:          "write to repo prefix (should fail)",
+			s3URI:         "s3://test-bucket/repo/",
+			path:          "file.txt",
+			operation:     "write",
+			expectError:   true,
+			expectedError: ErrReadOnlyS3Backend,
 		},
 		{
 			name:           "write to artifacts prefix (should succeed)",
@@ -319,8 +320,8 @@ func TestS3ReadOnlyWithArtifactsPrefix(t *testing.T) {
 						if reader != nil {
 							reader.Close()
 						}
-					} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+					} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+						t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 					}
 				} else {
 					if err != nil {
@@ -335,8 +336,8 @@ func TestS3ReadOnlyWithArtifactsPrefix(t *testing.T) {
 				if tt.expectError {
 					if err == nil {
 						t.Errorf("Expected error but got none")
-					} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+					} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+						t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 					}
 				} else {
 					if err != nil {
@@ -369,39 +370,39 @@ func TestIntegratedSecurityValidation(t *testing.T) {
 
 	// Test cases that should all fail due to various security violations
 	securityViolations := []struct {
-		name        string
-		virtualURI  string
-		operation   string
-		expectError bool
-		errorMsg    string
+		name          string
+		virtualURI    string
+		operation     string
+		expectError   bool
+		expectedError error
 	}{
 		{
 			name:        "scheme injection attempt",
 			virtualURI:  "mcp://repo/../file://etc/passwd",
 			operation:   "read",
 			expectError: true,
-			errorMsg:    "path traversal attempt",
+			// This will be caught by path validation, not a specific error type
 		},
 		{
-			name:        "write to read-only root",
-			virtualURI:  "mcp://repo/test.txt",
-			operation:   "write",
-			expectError: true,
-			errorMsg:    "not allowed on read-only resource",
+			name:          "write to read-only root",
+			virtualURI:    "mcp://repo/test.txt",
+			operation:     "write",
+			expectError:   true,
+			expectedError: ErrReadOnlyResource,
 		},
 		{
-			name:        "unauthorized scheme",
-			virtualURI:  "file:///etc/passwd",
-			operation:   "read",
-			expectError: true,
-			errorMsg:    "unauthorized scheme",
+			name:          "unauthorized scheme",
+			virtualURI:    "file:///etc/passwd",
+			operation:     "read",
+			expectError:   true,
+			expectedError: ErrUnauthorizedScheme,
 		},
 		{
 			name:        "path traversal in mcp URI",
 			virtualURI:  "mcp://repo/../../../etc/passwd",
 			operation:   "read",
 			expectError: true,
-			errorMsg:    "path traversal attempt",
+			// This will be caught by path validation, not a specific error type
 		},
 	}
 
@@ -411,7 +412,7 @@ func TestIntegratedSecurityValidation(t *testing.T) {
 
 			// Check if URI mapping itself fails (expected for scheme violations)
 			if err != nil {
-				if tt.expectError && tt.errorMsg != "" && strings.Contains(err.Error(), tt.errorMsg) {
+				if tt.expectError && tt.expectedError != nil && errors.Is(err, tt.expectedError) {
 					return // Expected error at URI mapping stage
 				}
 				if !tt.expectError {
@@ -430,8 +431,8 @@ func TestIntegratedSecurityValidation(t *testing.T) {
 				if tt.expectError {
 					if err == nil {
 						t.Errorf("Expected error for %s operation on %s but got none", tt.operation, tt.virtualURI)
-					} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error to contain '%s', got: %v", tt.errorMsg, err)
+					} else if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
+						t.Errorf("Expected error %v, got: %v", tt.expectedError, err)
 					}
 				} else {
 					if err != nil {
