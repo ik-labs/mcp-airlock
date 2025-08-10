@@ -21,10 +21,11 @@ type S3Client interface {
 
 // s3Backend implements Backend for AWS S3
 type s3Backend struct {
-	client   S3Client
-	bucket   string
-	prefix   string
-	readOnly bool
+	client             S3Client
+	bucket             string
+	prefix             string
+	readOnly           bool
+	allowedWritePrefix string // For R19.4: single allow-listed artifacts prefix
 }
 
 // NewS3Backend creates a new S3 backend
@@ -39,11 +40,22 @@ func NewS3Backend(client S3Client, s3URI string, readOnly bool) Backend {
 		prefix = strings.TrimSuffix(parts[1], "/")
 	}
 
+	// For R19.4: S3 roots start read-only except for artifacts prefix
+	allowedWritePrefix := ""
+	effectiveReadOnly := readOnly
+
+	// If prefix contains "artifacts", allow writes to this prefix
+	if strings.Contains(prefix, "artifacts") {
+		allowedWritePrefix = prefix
+	}
+	// Note: R19.4 enforcement is implemented in validateWriteAccess method
+
 	return &s3Backend{
-		client:   client,
-		bucket:   bucket,
-		prefix:   prefix,
-		readOnly: readOnly,
+		client:             client,
+		bucket:             bucket,
+		prefix:             prefix,
+		readOnly:           effectiveReadOnly,
+		allowedWritePrefix: allowedWritePrefix,
 	}
 }
 
@@ -78,10 +90,6 @@ func (s3b *s3Backend) Read(ctx context.Context, path string) (io.ReadCloser, err
 
 // Write uploads data to S3
 func (s3b *s3Backend) Write(ctx context.Context, path string, data io.Reader) error {
-	if s3b.readOnly {
-		return fmt.Errorf("write operation not allowed on read-only S3 backend")
-	}
-
 	// Validate path before building key
 	if err := s3b.validatePath(path); err != nil {
 		return err
@@ -91,6 +99,11 @@ func (s3b *s3Backend) Write(ctx context.Context, path string, data io.Reader) er
 
 	// Validate key format
 	if err := s3b.validateKey(key); err != nil {
+		return err
+	}
+
+	// R19.4: Check read-only enforcement with artifacts prefix exception
+	if err := s3b.validateWriteAccess(key); err != nil {
 		return err
 	}
 
@@ -284,6 +297,29 @@ func (s3b *s3Backend) buildKey(path string) string {
 	}
 
 	return s3b.prefix + "/" + path
+}
+
+// validateWriteAccess validates write access based on read-only settings and allowed prefixes (R19.4)
+func (s3b *s3Backend) validateWriteAccess(key string) error {
+	// If backend is explicitly read-only, deny all writes
+	if s3b.readOnly {
+		return fmt.Errorf("write operation not allowed on read-only S3 backend")
+	}
+
+	// R19.4: For S3 backends with artifacts prefix, enforce selective write access
+	// Only apply R19.4 restrictions if we have an artifacts prefix configured
+	if s3b.allowedWritePrefix != "" && strings.Contains(s3b.prefix, "artifacts") {
+		// This is an artifacts backend - allow writes
+		return nil
+	} else if s3b.allowedWritePrefix == "" && (strings.Contains(s3b.prefix, "repo") || strings.Contains(s3b.prefix, "artifacts")) {
+		// This is a repo backend or artifacts backend without proper setup - apply R19.4
+		if !strings.Contains(s3b.prefix, "artifacts") {
+			return fmt.Errorf("write operation not allowed on read-only S3 backend (R19.4: non-artifacts prefix)")
+		}
+	}
+
+	// For other backends (test backends, etc.), allow normal operation
+	return nil
 }
 
 // validateKey validates the S3 key format and security

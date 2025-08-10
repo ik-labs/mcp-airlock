@@ -111,9 +111,14 @@ func (rm *rootMapper) MapURI(ctx context.Context, virtualURI string, tenant stri
 	defer rm.mu.RUnlock()
 
 	// Parse and validate URI
-	_, err := url.Parse(virtualURI)
+	parsedURI, err := url.Parse(virtualURI)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URI format: %w", err)
+	}
+
+	// Validate URI scheme whitelist (R19.1, R19.2)
+	if err := rm.validateURIScheme(parsedURI); err != nil {
+		return nil, fmt.Errorf("URI scheme validation failed: %w", err)
 	}
 
 	// Find matching root configuration
@@ -270,6 +275,45 @@ func (rm *rootMapper) validateConfig(config *RootConfig) error {
 	// Validate virtual URI format
 	if _, err := url.Parse(config.Virtual); err != nil {
 		return fmt.Errorf("invalid virtual URI: %w", err)
+	}
+
+	return nil
+}
+
+// validateURIScheme validates that the URI uses only allowed schemes (R19.1, R19.2)
+func (rm *rootMapper) validateURIScheme(parsedURI *url.URL) error {
+	// Define allowed schemes - only mcp:// with specific paths
+	allowedSchemes := map[string]bool{
+		"mcp": true,
+	}
+
+	// Check if scheme is allowed
+	if !allowedSchemes[parsedURI.Scheme] {
+		return fmt.Errorf("unauthorized scheme '%s': only mcp:// schemes are allowed", parsedURI.Scheme)
+	}
+
+	// For mcp:// scheme, validate against configured virtual roots
+	if parsedURI.Scheme == "mcp" {
+		// Reconstruct the full URI path for validation
+		fullURI := parsedURI.Scheme + "://" + parsedURI.Host + parsedURI.Path
+
+		// Check if the URI matches any configured virtual root
+		allowed := false
+		for virtualRoot := range rm.roots {
+			if strings.HasPrefix(fullURI, virtualRoot) {
+				allowed = true
+				break
+			}
+		}
+
+		if !allowed {
+			// Get list of configured virtual roots for error message
+			var configuredRoots []string
+			for virtualRoot := range rm.roots {
+				configuredRoots = append(configuredRoots, virtualRoot)
+			}
+			return fmt.Errorf("unauthorized mcp:// path '%s': only configured virtual roots are allowed: %v", fullURI, configuredRoots)
+		}
 	}
 
 	return nil

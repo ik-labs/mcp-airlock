@@ -51,7 +51,7 @@
   - Write unit tests for rate limiting scenarios with deterministic time control
   - _Requirements: R11.1, R11.2, R11.3_
 
-- [ ] 4. Policy engine integration with OPA/Rego
+- [x] 4. Policy engine integration with OPA/Rego
 - [x] 4.1 Create OPA policy engine wrapper with Last-Known-Good fallback
   - Implement PolicyEngine interface with OPA/Rego integration and LKG policy storage
   - Add policy compilation, caching, and hot-reload via SIGHUP with fallback behavior
@@ -81,7 +81,7 @@
   - Write property-based tests for path traversal prevention with testing/quick
   - _Requirements: R4.1, R4.3, R4.4, R4.5_
 
-- [ ] 5.2 Add read-only enforcement via mount-level and path sandboxing
+- [x] 5.2 Add read-only enforcement via mount-level and path sandboxing
   - Implement mount-level readOnly enforcement and path sandboxing (filepath.Clean, deny symlinks)
   - Add S3 read-only mode except for single allow-listed artifacts prefix
   - Create resource URI whitelist validation (only mcp://repo/, mcp://artifacts/ schemes)

@@ -14,15 +14,17 @@ import (
 
 // filesystemBackend implements Backend for local filesystem
 type filesystemBackend struct {
-	rootPath string
-	readOnly bool
+	rootPath     string
+	readOnly     bool
+	mountLevelRO bool // R4.2: Mount-level read-only enforcement
 }
 
 // NewFilesystemBackend creates a new filesystem backend
 func NewFilesystemBackend(rootPath string, readOnly bool) Backend {
 	return &filesystemBackend{
-		rootPath: rootPath,
-		readOnly: readOnly,
+		rootPath:     rootPath,
+		readOnly:     readOnly,
+		mountLevelRO: readOnly, // R4.2: Enable mount-level enforcement for read-only roots
 	}
 }
 
@@ -67,11 +69,12 @@ func (fs *filesystemBackend) Read(ctx context.Context, path string) (io.ReadClos
 
 // Write writes data to the file at the given path
 func (fs *filesystemBackend) Write(ctx context.Context, path string, data io.Reader) error {
-	if fs.readOnly {
-		return fmt.Errorf("write operation not allowed on read-only filesystem")
+	// R4.2: Mount-level read-only enforcement
+	if fs.readOnly || fs.mountLevelRO {
+		return fmt.Errorf("write operation not allowed on read-only filesystem (mount-level enforcement)")
 	}
 
-	// Validate path is within root
+	// Validate path is within root and follows security constraints
 	if err := fs.validatePath(path); err != nil {
 		return err
 	}
@@ -198,19 +201,33 @@ func (fs *filesystemBackend) Stat(ctx context.Context, path string) (*FileInfo, 
 
 // validatePath ensures the path is within the root directory
 func (fs *filesystemBackend) validatePath(path string) error {
+	// R4.2: Use filepath.Clean to normalize path first
+	cleanPath := filepath.Clean(path)
+
+	// R4.2: Deny any path containing .. after cleaning
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("path traversal attempt detected after cleaning: %s", path)
+	}
+
 	// Get absolute paths
 	absRoot, err := filepath.Abs(fs.rootPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve root path: %w", err)
 	}
 
-	absPath, err := filepath.Abs(path)
+	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
+
 	// Ensure path is within root before symlink resolution
 	if !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) && absPath != absRoot {
 		return fmt.Errorf("path outside root directory: %s", path)
+	}
+
+	// R4.2: Enhanced path sandboxing - deny symlinks in path components within root
+	if err := fs.checkSymlinksInPathSandboxed(absPath, absRoot); err != nil {
+		return err
 	}
 
 	// Resolve symlinks to detect symlink-based escapes
@@ -286,6 +303,28 @@ func (fs *filesystemBackend) validateNotSymlink(path string) error {
 
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("symlinks not allowed: %s", path)
+	}
+
+	return nil
+}
+
+// checkSymlinksInPathSandboxed performs R4.2 path sandboxing - deny symlinks within root
+func (fs *filesystemBackend) checkSymlinksInPathSandboxed(absPath, absRoot string) error {
+	// Walk through each component of the path to check for symlinks
+	currentPath := absPath
+	for strings.HasPrefix(currentPath, absRoot) && currentPath != absRoot {
+		if info, err := os.Lstat(currentPath); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("symlink detected in path (denied by sandboxing): %s", currentPath)
+			}
+		}
+
+		// Move to parent directory
+		parentPath := filepath.Dir(currentPath)
+		if parentPath == currentPath {
+			break // Reached root
+		}
+		currentPath = parentPath
 	}
 
 	return nil

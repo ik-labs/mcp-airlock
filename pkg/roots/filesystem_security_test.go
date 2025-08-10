@@ -138,13 +138,13 @@ func TestFilesystemBackend_SymlinkEscapeDetection(t *testing.T) {
 			name:        "symlink escape from subdirectory",
 			path:        symlinkInSub,
 			expectError: true,
-			errorMsg:    "symlink escape detected",
+			errorMsg:    "symlink detected in path (denied by sandboxing)",
 		},
 		{
 			name:        "symlink directory escape",
 			path:        filepath.Join(symlinkDir, "file.txt"),
 			expectError: true,
-			errorMsg:    "symlink escape detected",
+			errorMsg:    "symlink detected in path (denied by sandboxing)",
 		},
 	}
 
@@ -329,7 +329,7 @@ func TestFilesystemBackend_ReadSymlinkValidation(t *testing.T) {
 	_, err := backend.Read(context.Background(), symlinkFile)
 	if err == nil {
 		t.Errorf("Expected error when reading through symlink but got none")
-	} else if !strings.Contains(err.Error(), "symlinks not allowed") {
+	} else if !strings.Contains(err.Error(), "symlink detected in path (denied by sandboxing)") {
 		t.Errorf("Expected symlink error, got: %v", err)
 	}
 }
