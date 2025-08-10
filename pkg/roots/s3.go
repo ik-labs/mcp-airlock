@@ -306,7 +306,7 @@ func (s3b *s3Backend) buildKey(path string) string {
 }
 
 // validateWriteAccess validates write access based on read-only settings and allowed prefixes (R19.4)
-func (s3b *s3Backend) validateWriteAccess(key string) error {
+func (s3b *s3Backend) validateWriteAccess(_ string) error {
 	// R19.4: First check if this is an artifacts prefix that should allow writes
 	if s3b.allowedWritePrefix != "" && strings.EqualFold(s3b.prefix, s3b.allowedWritePrefix) {
 		// This is an artifacts backend with proper setup - allow writes even if readOnly is true

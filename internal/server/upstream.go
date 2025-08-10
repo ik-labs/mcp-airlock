@@ -14,33 +14,32 @@ import (
 
 // UpstreamConnector manages connections to upstream MCP servers
 type UpstreamConnector struct {
-	logger      *zap.Logger
-	clients     map[string]*UpstreamClient
-	mu          sync.RWMutex
-	config      *UpstreamConfig
-	maxClients  int
+	logger     *zap.Logger
+	clients    map[string]*UpstreamClient
+	mu         sync.RWMutex
+	maxClients int
 }
 
 // UpstreamClient represents a connection to an upstream MCP server
 type UpstreamClient struct {
-	name        string
-	client      *mcp.Client
-	session     *mcp.ClientSession
-	transport   mcp.Transport
-	config      *UpstreamConfig
-	logger      *zap.Logger
-	
+	name      string
+	client    *mcp.Client
+	session   *mcp.ClientSession
+	transport mcp.Transport
+	config    *UpstreamConfig
+	logger    *zap.Logger
+
 	// Connection state
-	ctx         context.Context
-	cancel      context.CancelFunc
-	connected   bool
-	lastUsed    time.Time
-	mu          sync.RWMutex
-	
+	ctx       context.Context
+	cancel    context.CancelFunc
+	connected bool
+	lastUsed  time.Time
+	mu        sync.RWMutex
+
 	// Connection metrics
-	requestCount  int64
-	errorCount    int64
-	createdAt     time.Time
+	requestCount int64
+	errorCount   int64
+	createdAt    time.Time
 }
 
 // UpstreamConfig contains configuration for an upstream MCP server
@@ -67,46 +66,46 @@ func NewUpstreamConnector(logger *zap.Logger, maxClients int) *UpstreamConnector
 func (uc *UpstreamConnector) Connect(ctx context.Context, config *UpstreamConfig) (*UpstreamClient, error) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	// Check if client already exists
 	if client, exists := uc.clients[config.Name]; exists {
 		client.mu.RLock()
 		connected := client.connected
 		client.mu.RUnlock()
-		
+
 		if connected {
 			client.updateLastUsed()
 			return client, nil
 		}
-		
+
 		// Remove disconnected client
 		delete(uc.clients, config.Name)
 	}
-	
+
 	// Check client limit
 	if len(uc.clients) >= uc.maxClients {
 		return nil, fmt.Errorf("maximum upstream clients exceeded: %d", uc.maxClients)
 	}
-	
+
 	uc.logger.Info("Connecting to upstream server",
 		zap.String("name", config.Name),
 		zap.String("type", config.Type),
 	)
-	
+
 	// Create transport based on type
 	transport, err := uc.createTransport(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transport for %s: %w", config.Name, err)
 	}
-	
+
 	// Create MCP client with implementation and options
 	impl := &mcp.Implementation{}
 	opts := &mcp.ClientOptions{}
 	client := mcp.NewClient(impl, opts)
-	
+
 	// Create client context
 	clientCtx, cancel := context.WithCancel(ctx)
-	
+
 	upstreamClient := &UpstreamClient{
 		name:      config.Name,
 		client:    client,
@@ -119,20 +118,20 @@ func (uc *UpstreamConnector) Connect(ctx context.Context, config *UpstreamConfig
 		lastUsed:  time.Now(),
 		createdAt: time.Now(),
 	}
-	
+
 	// Connect the client
 	if err := upstreamClient.connect(clientCtx); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to connect to upstream %s: %w", config.Name, err)
 	}
-	
+
 	uc.clients[config.Name] = upstreamClient
-	
+
 	uc.logger.Info("Successfully connected to upstream server",
 		zap.String("name", config.Name),
 		zap.Int("total_clients", len(uc.clients)),
 	)
-	
+
 	return upstreamClient, nil
 }
 
@@ -153,29 +152,29 @@ func (uc *UpstreamConnector) createStdioTransport(ctx context.Context, config *U
 	if len(config.Command) == 0 {
 		return nil, fmt.Errorf("command is required for stdio transport")
 	}
-	
+
 	// Create command with context
 	cmd := exec.CommandContext(ctx, config.Command[0], config.Command[1:]...)
-	
+
 	// Set environment variables
 	if config.Env != nil {
 		for key, value := range config.Env {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
 		}
 	}
-	
+
 	// Create command transport (client-side transport for subprocess)
 	transport := mcp.NewCommandTransport(cmd)
-	
+
 	return transport, nil
 }
 
 // createUnixTransport creates a Unix socket transport
-func (uc *UpstreamConnector) createUnixTransport(ctx context.Context, config *UpstreamConfig) (mcp.Transport, error) {
+func (uc *UpstreamConnector) createUnixTransport(_ context.Context, config *UpstreamConfig) (mcp.Transport, error) {
 	if config.Socket == "" {
 		return nil, fmt.Errorf("socket path is required for unix transport")
 	}
-	
+
 	// For Unix sockets, we'll use a custom transport implementation
 	// Since the SDK doesn't provide a direct Unix socket transport,
 	// we'll use stdio transport as a placeholder for now
@@ -187,20 +186,20 @@ func (uc *UpstreamConnector) createUnixTransport(ctx context.Context, config *Up
 func (uc *UpstreamConnector) GetClient(name string) (*UpstreamClient, error) {
 	uc.mu.RLock()
 	defer uc.mu.RUnlock()
-	
+
 	client, exists := uc.clients[name]
 	if !exists {
 		return nil, fmt.Errorf("upstream client %s not found", name)
 	}
-	
+
 	client.mu.RLock()
 	connected := client.connected
 	client.mu.RUnlock()
-	
+
 	if !connected {
 		return nil, fmt.Errorf("upstream client %s is not connected", name)
 	}
-	
+
 	client.updateLastUsed()
 	return client, nil
 }
@@ -211,7 +210,7 @@ func (uc *UpstreamConnector) ProxyRequest(ctx context.Context, upstreamName stri
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return client.SendRequest(ctx, method, params)
 }
 
@@ -219,20 +218,20 @@ func (uc *UpstreamConnector) ProxyRequest(ctx context.Context, upstreamName stri
 func (uc *UpstreamConnector) CloseClient(name string) error {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	client, exists := uc.clients[name]
 	if !exists {
 		return fmt.Errorf("upstream client %s not found", name)
 	}
-	
+
 	client.Close()
 	delete(uc.clients, name)
-	
+
 	uc.logger.Info("Closed upstream client",
 		zap.String("name", name),
 		zap.Int("remaining_clients", len(uc.clients)),
 	)
-	
+
 	return nil
 }
 
@@ -240,12 +239,12 @@ func (uc *UpstreamConnector) CloseClient(name string) error {
 func (uc *UpstreamConnector) CloseAll() {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	for name, client := range uc.clients {
 		client.Close()
 		uc.logger.Info("Closed upstream client", zap.String("name", name))
 	}
-	
+
 	uc.clients = make(map[string]*UpstreamClient)
 	uc.logger.Info("Closed all upstream clients")
 }
@@ -254,7 +253,7 @@ func (uc *UpstreamConnector) CloseAll() {
 func (uc *UpstreamConnector) ListClients() []string {
 	uc.mu.RLock()
 	defer uc.mu.RUnlock()
-	
+
 	var names []string
 	for name, client := range uc.clients {
 		client.mu.RLock()
@@ -263,7 +262,7 @@ func (uc *UpstreamConnector) ListClients() []string {
 		}
 		client.mu.RUnlock()
 	}
-	
+
 	return names
 }
 
@@ -271,31 +270,31 @@ func (uc *UpstreamConnector) ListClients() []string {
 func (uc *UpstreamConnector) CleanupStaleClients(maxIdleTime time.Duration) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	staleThreshold := time.Now().Add(-maxIdleTime)
 	var staleClients []string
-	
+
 	for name, client := range uc.clients {
 		client.mu.RLock()
 		isStale := client.lastUsed.Before(staleThreshold) || !client.connected
 		client.mu.RUnlock()
-		
+
 		if isStale {
 			staleClients = append(staleClients, name)
 		}
 	}
-	
+
 	for _, name := range staleClients {
 		if client, exists := uc.clients[name]; exists {
 			client.Close()
 			delete(uc.clients, name)
-			
+
 			uc.logger.Info("Cleaned up stale upstream client",
 				zap.String("name", name),
 			)
 		}
 	}
-	
+
 	if len(staleClients) > 0 {
 		uc.logger.Info("Upstream cleanup completed",
 			zap.Int("cleaned_clients", len(staleClients)),
@@ -310,17 +309,17 @@ func (uc *UpstreamConnector) CleanupStaleClients(maxIdleTime time.Duration) {
 func (uc *UpstreamClient) connect(ctx context.Context) error {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	// Connect the client with the transport
 	session, err := uc.client.Connect(ctx, uc.transport)
 	if err != nil {
 		return fmt.Errorf("failed to connect client: %w", err)
 	}
-	
+
 	uc.session = session
 	uc.connected = true
 	uc.logger.Info("Connected to upstream server")
-	
+
 	return nil
 }
 
@@ -333,22 +332,22 @@ func (uc *UpstreamClient) SendRequest(ctx context.Context, method string, params
 	}
 	session := uc.session
 	uc.mu.RUnlock()
-	
+
 	// Apply timeout if configured
 	if uc.config.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, uc.config.Timeout)
 		defer cancel()
 	}
-	
+
 	uc.logger.Debug("Sending request to upstream",
 		zap.String("method", method),
 	)
-	
+
 	// Route to appropriate MCP method based on method name
 	var result interface{}
 	var err error
-	
+
 	switch method {
 	case "tools/list":
 		if p, ok := params.(*mcp.ListToolsParams); ok {
@@ -402,14 +401,14 @@ func (uc *UpstreamClient) SendRequest(ctx context.Context, method string, params
 	default:
 		err = fmt.Errorf("unsupported method: %s", method)
 	}
-	
+
 	uc.mu.Lock()
 	uc.requestCount++
 	if err != nil {
 		uc.errorCount++
 	}
 	uc.mu.Unlock()
-	
+
 	if err != nil {
 		uc.logger.Error("Upstream request failed",
 			zap.String("method", method),
@@ -417,11 +416,11 @@ func (uc *UpstreamClient) SendRequest(ctx context.Context, method string, params
 		)
 		return nil, fmt.Errorf("upstream request failed: %w", err)
 	}
-	
+
 	uc.logger.Debug("Upstream request successful",
 		zap.String("method", method),
 	)
-	
+
 	uc.updateLastUsed()
 	return result, nil
 }
@@ -430,18 +429,18 @@ func (uc *UpstreamClient) SendRequest(ctx context.Context, method string, params
 func (uc *UpstreamClient) Close() {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	
+
 	if uc.connected {
 		uc.connected = false
 		uc.cancel()
-		
+
 		// Close the MCP client session
 		if uc.session != nil {
 			if err := uc.session.Close(); err != nil {
 				uc.logger.Error("Error closing upstream client session", zap.Error(err))
 			}
 		}
-		
+
 		uc.logger.Info("Upstream client closed")
 	}
 }
@@ -457,7 +456,7 @@ func (uc *UpstreamClient) IsConnected() bool {
 func (uc *UpstreamClient) GetStats() map[string]interface{} {
 	uc.mu.RLock()
 	defer uc.mu.RUnlock()
-	
+
 	return map[string]interface{}{
 		"name":          uc.name,
 		"connected":     uc.connected,

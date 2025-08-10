@@ -296,9 +296,7 @@ func TestFilesystemBackend_CreateFileSecure(t *testing.T) {
 				return
 			}
 
-			if file != nil {
-				file.Close()
-			}
+			file.Close()
 
 			// Verify file was created
 			if _, err := os.Stat(tt.path); err != nil {

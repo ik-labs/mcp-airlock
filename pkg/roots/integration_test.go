@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ik-labs/mcp-airlock/pkg/policy"
 	"go.uber.org/zap/zaptest"
 )
+
+// containsString checks if a string contains a substring
+func containsString(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
 
 func TestPolicyIntegration_AuthorizeResourceAccess(t *testing.T) {
 	logger := zaptest.NewLogger(t)
@@ -299,7 +305,7 @@ func TestValidateResourceRequest(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got none")
-				} else if tt.errorMsg != "" && !containsString(err.Error(), tt.errorMsg) {
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
 					t.Errorf("Expected error message to contain '%s', got '%s'",
 						tt.errorMsg, err.Error())
 				}

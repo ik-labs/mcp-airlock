@@ -9,6 +9,23 @@ import (
 	"go.uber.org/zap"
 )
 
+// contextKey is a type for context keys to avoid collisions
+type contextKey string
+
+const (
+	correlationIDKey contextKey = "correlation_id"
+)
+
+// getCorrelationIDFromContext extracts correlation ID from context
+func getCorrelationIDFromContext(ctx context.Context) string {
+	if id := ctx.Value(correlationIDKey); id != nil {
+		if idStr, ok := id.(string); ok {
+			return idStr
+		}
+	}
+	return "unknown"
+}
+
 // PolicyIntegration provides integration between root virtualization and policy engine
 type PolicyIntegration struct {
 	mapper       RootMapper

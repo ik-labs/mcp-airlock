@@ -172,7 +172,8 @@ func TestRootMiddleware_ProcessRequest(t *testing.T) {
 				// Check if URI was mapped to real path
 				if method, exists := processedRequest["method"]; exists {
 					if methodStr, ok := method.(string); ok {
-						if methodStr == "resources/read" {
+						switch methodStr {
+						case "resources/read":
 							if params, exists := processedRequest["params"]; exists {
 								if paramsMap, ok := params.(map[string]interface{}); ok {
 									if uri, exists := paramsMap["uri"]; exists {
@@ -184,7 +185,7 @@ func TestRootMiddleware_ProcessRequest(t *testing.T) {
 									}
 								}
 							}
-						} else if methodStr == "tools/call" {
+						case "tools/call":
 							if params, exists := processedRequest["params"]; exists {
 								if paramsMap, ok := params.(map[string]interface{}); ok {
 									if args, exists := paramsMap["arguments"]; exists {

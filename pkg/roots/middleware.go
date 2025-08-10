@@ -47,14 +47,6 @@ type MCPError struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// ResourceRequest represents a request that involves resource access
-type ResourceRequest struct {
-	URI       string                 `json:"uri"`
-	Operation string                 `json:"operation"`
-	Content   []byte                 `json:"content,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-}
-
 // ProcessRequest processes an MCP request and applies root virtualization
 func (rm *RootMiddleware) ProcessRequest(ctx context.Context, tenant string, requestData []byte) ([]byte, error) {
 	start := time.Now()
@@ -373,12 +365,26 @@ func (rm *RootMiddleware) devirtualizeValue(ctx context.Context, tenant string, 
 }
 
 // convertRealPathToVirtualURI attempts to convert a real path back to a virtual URI
-func (rm *RootMiddleware) convertRealPathToVirtualURI(ctx context.Context, tenant string, path string) string {
-	// This is a simplified implementation - in practice, you might want to maintain
-	// a reverse mapping or iterate through configured roots to find matches
+func (rm *RootMiddleware) convertRealPathToVirtualURI(ctx context.Context, _ string, path string) string {
+	_ = ctx // TODO: Use context for reverse mapping when implemented
 
-	// For now, we'll just return the path as-is if we can't convert it
-	// A more sophisticated implementation would maintain bidirectional mapping
+	// Try to find a virtual root that matches this real path
+	// This is a reverse lookup operation
+
+	// For filesystem paths, try to match against configured roots
+	// Note: This is a simplified implementation. A production system might
+	// maintain a reverse index for better performance
+
+	// If the path doesn't look like an absolute path that we can reverse map,
+	// return it unchanged
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "s3://") {
+		return path
+	}
+
+	// For now, return the path unchanged as reverse mapping requires
+	// access to the root configurations which aren't directly available here.
+	// In a full implementation, this would iterate through configured roots
+	// to find a match and construct the virtual URI.
 	return path
 }
 
@@ -412,14 +418,4 @@ func (rm *RootMiddleware) createErrorResponse(id interface{}, code int, message 
 	}
 
 	return json.Marshal(response)
-}
-
-// getCorrelationIDFromContext extracts correlation ID from context
-func getCorrelationIDFromContext(ctx context.Context) string {
-	if id := ctx.Value("correlation_id"); id != nil {
-		if idStr, ok := id.(string); ok {
-			return idStr
-		}
-	}
-	return "unknown"
 }

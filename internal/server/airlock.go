@@ -8,14 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 )
 
 // AirlockServer implements the core MCP server with security middleware
 type AirlockServer struct {
 	logger      *zap.Logger
-	mcpServer   mcp.Server
 	connections *ConnectionPool
 	clientPool  *ClientPool
 	proxy       *RequestProxy

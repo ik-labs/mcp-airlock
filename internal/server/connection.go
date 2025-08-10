@@ -646,12 +646,6 @@ func (c *ClientConnection) IsConnected() bool {
 	return c.connected
 }
 
-// RootMiddleware interface for root virtualization processing
-type RootMiddleware interface {
-	ProcessRequest(ctx context.Context, tenant string, requestData []byte) ([]byte, error)
-	ProcessResponse(ctx context.Context, tenant string, responseData []byte) ([]byte, error)
-}
-
 // SetProxy sets the request proxy for message routing
 func (c *ClientConnection) SetProxy(proxy *RequestProxy) {
 	c.mu.Lock()
@@ -668,10 +662,5 @@ func (c *ClientConnection) SetRootMiddleware(middleware RootMiddleware) {
 
 // getTenantFromContext extracts tenant from context
 func getTenantFromContext(ctx context.Context) string {
-	if tenant := ctx.Value("tenant"); tenant != nil {
-		if tenantStr, ok := tenant.(string); ok {
-			return tenantStr
-		}
-	}
-	return ""
+	return getTenant(ctx)
 }

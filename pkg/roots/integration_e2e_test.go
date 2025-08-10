@@ -258,7 +258,7 @@ allow if {
 							if errorMap, ok := errorField.(map[string]interface{}); ok {
 								if message, exists := errorMap["message"]; exists {
 									if messageStr, ok := message.(string); ok {
-										if tc.expectedReason != "" && !containsString(messageStr, tc.expectedReason) {
+										if tc.expectedReason != "" && !strings.Contains(messageStr, tc.expectedReason) {
 											t.Errorf("Expected error message to contain '%s', got '%s'", tc.expectedReason, messageStr)
 										}
 									}
@@ -285,7 +285,8 @@ allow if {
 			// Verify that virtual URIs were properly mapped for resource requests
 			if method, exists := processedRequest["method"]; exists {
 				if methodStr, ok := method.(string); ok {
-					if methodStr == "resources/read" {
+					switch methodStr {
+					case "resources/read":
 						if params, exists := processedRequest["params"]; exists {
 							if paramsMap, ok := params.(map[string]interface{}); ok {
 								if uri, exists := paramsMap["uri"]; exists {
@@ -298,7 +299,7 @@ allow if {
 								}
 							}
 						}
-					} else if methodStr == "resources/list" {
+					case "resources/list":
 						// List requests don't map URIs to real paths, they validate and pass through
 						if params, exists := processedRequest["params"]; exists {
 							if paramsMap, ok := params.(map[string]interface{}); ok {
@@ -312,7 +313,7 @@ allow if {
 								}
 							}
 						}
-					} else if methodStr == "tools/call" {
+					case "tools/call":
 						// Verify tool arguments were processed
 						if params, exists := processedRequest["params"]; exists {
 							if paramsMap, ok := params.(map[string]interface{}); ok {
@@ -469,22 +470,4 @@ func extractOperationFromMethod(method string) string {
 	default:
 		return "read"
 	}
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			(len(s) > len(substr) &&
-				(s[:len(substr)] == substr ||
-					s[len(s)-len(substr):] == substr ||
-					containsSubstring(s, substr))))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
