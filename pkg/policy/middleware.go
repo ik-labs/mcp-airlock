@@ -91,6 +91,15 @@ func (pm *PolicyMiddleware) generateInputDigest(input *PolicyInput) string {
 	h.Write([]byte(input.Resource))
 	h.Write([]byte(input.Method))
 
+	// Include root-based authorization fields for audit
+	h.Write([]byte(input.VirtualURI))
+	h.Write([]byte(input.RootType))
+	h.Write([]byte(input.Operation))
+	if input.ReadOnly {
+		h.Write([]byte("readonly"))
+	}
+	// Note: RealPath is not included in digest to avoid logging sensitive paths
+
 	// Include groups in sorted order for consistency
 	// Sort groups for deterministic hashing
 	sort.Strings(input.Groups)

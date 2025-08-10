@@ -30,6 +30,12 @@ type PolicyInput struct {
 	Resource string            `json:"resource"`
 	Method   string            `json:"method"`
 	Headers  map[string]string `json:"headers"`
+	// Root-based authorization fields
+	VirtualURI string `json:"virtual_uri,omitempty"`
+	RealPath   string `json:"real_path,omitempty"`
+	RootType   string `json:"root_type,omitempty"` // "fs", "s3"
+	ReadOnly   bool   `json:"read_only,omitempty"`
+	Operation  string `json:"operation,omitempty"` // "read", "write", "list"
 }
 
 // PolicyDecision represents the result of policy evaluation
@@ -277,6 +283,15 @@ func (pe *OPAEngine) generateCacheKey(input *PolicyInput) string {
 	h.Write([]byte(input.Tool))
 	h.Write([]byte(input.Resource))
 	h.Write([]byte(input.Method))
+
+	// Include root-based authorization fields
+	h.Write([]byte(input.VirtualURI))
+	h.Write([]byte(input.RealPath))
+	h.Write([]byte(input.RootType))
+	h.Write([]byte(input.Operation))
+	if input.ReadOnly {
+		h.Write([]byte("readonly"))
+	}
 
 	// Include groups in sorted order for consistency
 	for _, group := range input.Groups {

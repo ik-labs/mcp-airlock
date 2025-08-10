@@ -88,7 +88,7 @@
   - Write integration tests for read-only enforcement and URI validation
   - _Requirements: R4.2, R4.5, R19.1, R19.2, R19.4_
 
-- [ ] 5.3 Integrate root virtualization with MCP message processing
+- [x] 5.3 Integrate root virtualization with MCP message processing
   - Add root mapping to MCP request/response processing pipeline
   - Implement resource URI rewriting for upstream server communication
   - Add root-based authorization checks in policy engine

@@ -22,6 +22,9 @@ type AirlockServer struct {
 	config      *Config
 	httpServer  *http.Server
 
+	// Security middleware
+	rootMiddleware RootMiddleware
+
 	// Graceful shutdown
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -299,6 +302,15 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 	// Set the proxy for message handling
 	conn.SetProxy(s.proxy)
 
+	// Set root middleware if available
+	s.mu.RLock()
+	rootMiddleware := s.rootMiddleware
+	s.mu.RUnlock()
+
+	if rootMiddleware != nil {
+		conn.SetRootMiddleware(rootMiddleware)
+	}
+
 	// Handle the connection (blocks until connection closes)
 	conn.Handle(ctx)
 
@@ -310,6 +322,19 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 // AddUpstream adds an upstream server configuration
 func (s *AirlockServer) AddUpstream(config *UpstreamConfig) error {
 	return s.clientPool.AddUpstream(config)
+}
+
+// RootMiddleware interface for root virtualization processing
+type RootMiddleware interface {
+	ProcessRequest(ctx context.Context, tenant string, requestData []byte) ([]byte, error)
+	ProcessResponse(ctx context.Context, tenant string, responseData []byte) ([]byte, error)
+}
+
+// SetRootMiddleware sets the root virtualization middleware
+func (s *AirlockServer) SetRootMiddleware(middleware RootMiddleware) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rootMiddleware = middleware
 }
 
 // GetMetrics returns server metrics

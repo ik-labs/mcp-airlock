@@ -35,8 +35,9 @@ type ClientConnection struct {
 	maxMessageSize    int64
 	heartbeatInterval time.Duration
 
-	// Message routing
-	proxy *RequestProxy
+	// Message routing and processing
+	proxy          *RequestProxy
+	rootMiddleware RootMiddleware
 }
 
 // ConnectionPool manages multiple client connections
@@ -391,9 +392,52 @@ func (c *ClientConnection) routeToUpstream(ctx context.Context, message map[stri
 	}
 	upstream := upstreams[0]
 
+	// Apply root virtualization if available
+	var modifiedMessage map[string]interface{}
+	if c.rootMiddleware != nil {
+		// Get tenant from context (would be set by authentication middleware)
+		tenant := getTenantFromContext(ctx)
+		if tenant == "" {
+			tenant = "default" // Fallback for testing
+		}
+
+		// Marshal message for root middleware processing
+		messageData, err := json.Marshal(message)
+		if err != nil {
+			return c.createErrorResponse(message["id"], -32603, "Internal error", map[string]interface{}{
+				"correlation_id": getCorrelationID(ctx),
+			})
+		}
+
+		// Process request through root virtualization
+		processedData, err := c.rootMiddleware.ProcessRequest(ctx, tenant, messageData)
+		if err != nil {
+			c.logger.Error("Root virtualization failed",
+				zap.String("correlation_id", getCorrelationID(ctx)),
+				zap.String("method", method),
+				zap.Error(err),
+			)
+			return processedData, nil // processedData contains error response
+		}
+
+		// Unmarshal the processed message
+		if err := json.Unmarshal(processedData, &modifiedMessage); err != nil {
+			return c.createErrorResponse(message["id"], -32603, "Internal error", map[string]interface{}{
+				"correlation_id": getCorrelationID(ctx),
+			})
+		}
+
+		// Update params from the modified message
+		if modifiedParams, exists := modifiedMessage["params"]; exists {
+			params = modifiedParams
+		}
+	} else {
+		modifiedMessage = message
+	}
+
 	// Create proxy request
 	proxyReq := &ProxyRequest{
-		ID:       message["id"],
+		ID:       modifiedMessage["id"],
 		Method:   method,
 		Params:   params,
 		Upstream: upstream,
@@ -433,21 +477,50 @@ func (c *ClientConnection) routeToUpstream(ctx context.Context, message map[stri
 		}
 	}
 
-	// Add correlation ID to response
-	if response["error"] != nil {
-		if errorData, ok := response["error"].(map[string]interface{}); ok {
-			if errorData["data"] == nil {
-				errorData["data"] = map[string]interface{}{}
-			}
-			if data, ok := errorData["data"].(map[string]interface{}); ok {
-				data["correlation_id"] = getCorrelationID(ctx)
+	// Apply reverse root virtualization to response if available
+	var finalResponseData []byte
+	if c.rootMiddleware != nil {
+		// Get tenant from context
+		tenant := getTenantFromContext(ctx)
+		if tenant == "" {
+			tenant = "default" // Fallback for testing
+		}
+
+		// Marshal response for root middleware processing
+		responseData, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		// Process response through root devirtualization
+		processedResponseData, err := c.rootMiddleware.ProcessResponse(ctx, tenant, responseData)
+		if err != nil {
+			c.logger.Warn("Response devirtualization failed, using original",
+				zap.String("correlation_id", getCorrelationID(ctx)),
+				zap.Error(err),
+			)
+			finalResponseData = responseData
+		} else {
+			finalResponseData = processedResponseData
+		}
+	} else {
+		// Add correlation ID to response
+		if response["error"] != nil {
+			if errorData, ok := response["error"].(map[string]interface{}); ok {
+				if errorData["data"] == nil {
+					errorData["data"] = map[string]interface{}{}
+				}
+				if data, ok := errorData["data"].(map[string]interface{}); ok {
+					data["correlation_id"] = getCorrelationID(ctx)
+				}
 			}
 		}
-	}
 
-	responseData, err := json.Marshal(response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal response: %w", err)
+		responseData, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+		finalResponseData = responseData
 	}
 
 	// Log the completed request
@@ -459,7 +532,7 @@ func (c *ClientConnection) routeToUpstream(ctx context.Context, message map[stri
 		zap.Bool("success", proxyResp.Error == nil),
 	)
 
-	return responseData, nil
+	return finalResponseData, nil
 }
 
 // createEchoResponse creates an echo response for testing
@@ -573,9 +646,32 @@ func (c *ClientConnection) IsConnected() bool {
 	return c.connected
 }
 
+// RootMiddleware interface for root virtualization processing
+type RootMiddleware interface {
+	ProcessRequest(ctx context.Context, tenant string, requestData []byte) ([]byte, error)
+	ProcessResponse(ctx context.Context, tenant string, responseData []byte) ([]byte, error)
+}
+
 // SetProxy sets the request proxy for message routing
 func (c *ClientConnection) SetProxy(proxy *RequestProxy) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.proxy = proxy
+}
+
+// SetRootMiddleware sets the root virtualization middleware
+func (c *ClientConnection) SetRootMiddleware(middleware RootMiddleware) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rootMiddleware = middleware
+}
+
+// getTenantFromContext extracts tenant from context
+func getTenantFromContext(ctx context.Context) string {
+	if tenant := ctx.Value("tenant"); tenant != nil {
+		if tenantStr, ok := tenant.(string); ok {
+			return tenantStr
+		}
+	}
+	return ""
 }

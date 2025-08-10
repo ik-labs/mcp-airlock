@@ -138,15 +138,29 @@ func (rm *rootMapper) MapURI(ctx context.Context, virtualURI string, tenant stri
 	var relativePath string
 
 	for virtualRoot, config := range rm.roots {
-		// Normalize the virtual root for comparison
+		// Normalize the virtual root for comparison (case-insensitive) and enforce a boundary
 		normalizedRoot := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(virtualRoot, "/")))
 		normalizedURIForComparison := strings.TrimSuffix(normalizedURI, "/")
-
-		if strings.HasPrefix(normalizedURIForComparison, normalizedRoot) {
+		if normalizedURIForComparison == normalizedRoot || strings.HasPrefix(normalizedURIForComparison, normalizedRoot+"/") {
 			rootConfig = config
-			// Extract relative path using the original URI to preserve case
-			relativePath = strings.TrimPrefix(virtualURI, virtualRoot)
-			relativePath = strings.TrimPrefix(relativePath, "/")
+			// Extract relative path using parsed URI path (preserve case), relative to the configured root path
+			vrURL, err := url.Parse(virtualRoot)
+			if err != nil {
+				continue
+			}
+			rootPath := strings.TrimSuffix(vrURL.Path, "/")
+			uriPath := parsedURI.Path
+			if rootPath == "" || rootPath == "/" {
+				relativePath = strings.TrimPrefix(uriPath, "/")
+			} else if len(uriPath) >= len(rootPath) && strings.EqualFold(uriPath[:len(rootPath)], rootPath) {
+				offset := len(rootPath)
+				if len(uriPath) > offset && uriPath[offset] == '/' {
+					offset++
+				}
+				relativePath = uriPath[offset:]
+			} else {
+				relativePath = strings.TrimPrefix(uriPath, "/")
+			}
 			break
 		}
 	}
