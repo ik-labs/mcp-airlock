@@ -365,26 +365,19 @@ func (rm *RootMiddleware) devirtualizeValue(ctx context.Context, tenant string, 
 }
 
 // convertRealPathToVirtualURI attempts to convert a real path back to a virtual URI
-func (rm *RootMiddleware) convertRealPathToVirtualURI(ctx context.Context, _ string, path string) string {
-	_ = ctx // TODO: Use context for reverse mapping when implemented
-
-	// Try to find a virtual root that matches this real path
-	// This is a reverse lookup operation
-
-	// For filesystem paths, try to match against configured roots
-	// Note: This is a simplified implementation. A production system might
-	// maintain a reverse index for better performance
-
+func (rm *RootMiddleware) convertRealPathToVirtualURI(ctx context.Context, tenant string, path string) string {
 	// If the path doesn't look like an absolute path that we can reverse map,
 	// return it unchanged
 	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "s3://") {
 		return path
 	}
 
-	// For now, return the path unchanged as reverse mapping requires
-	// access to the root configurations which aren't directly available here.
-	// In a full implementation, this would iterate through configured roots
-	// to find a match and construct the virtual URI.
+	// Use the RootMapper's ReverseMap method to convert real path to virtual URI
+	if virtualURI, found := rm.mapper.ReverseMap(ctx, tenant, path); found {
+		return virtualURI
+	}
+
+	// If no mapping found, return the original path
 	return path
 }
 

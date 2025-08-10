@@ -23,6 +23,7 @@ type RootMapper interface {
 	MapURI(ctx context.Context, virtualURI string, tenant string) (*MappedResource, error)
 	ValidateAccess(ctx context.Context, resource *MappedResource, operation string) error
 	StreamResource(ctx context.Context, resource *MappedResource) (io.ReadCloser, error)
+	ReverseMap(ctx context.Context, tenant string, realPath string) (string, bool)
 }
 
 // MappedResource represents a mapped virtual resource
@@ -206,6 +207,67 @@ func (rm *rootMapper) StreamResource(ctx context.Context, resource *MappedResour
 	}
 
 	return resource.Backend.Read(ctx, resource.RealPath)
+}
+
+// ReverseMap attempts to convert a real path back to a virtual URI
+func (rm *rootMapper) ReverseMap(ctx context.Context, tenant string, realPath string) (string, bool) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	// Try to find a matching root configuration by checking if the real path
+	// starts with any configured real path
+	for virtualRoot, config := range rm.roots {
+		// Handle different backend types
+		switch config.Type {
+		case "fs":
+			// For filesystem paths, check if realPath is within the configured real path
+			absConfigReal, err := filepath.Abs(config.Real)
+			if err != nil {
+				continue
+			}
+
+			absRealPath, err := filepath.Abs(realPath)
+			if err != nil {
+				continue
+			}
+
+			// Check if the real path is within this root
+			if absRealPath == absConfigReal {
+				// Exact match - return the virtual root
+				return virtualRoot, true
+			} else if strings.HasPrefix(absRealPath, absConfigReal+string(filepath.Separator)) {
+				// Path is within this root - construct virtual URI with relative path
+				relativePath, err := filepath.Rel(absConfigReal, absRealPath)
+				if err != nil {
+					continue
+				}
+
+				// Convert filesystem path separators to forward slashes for URI
+				relativePath = filepath.ToSlash(relativePath)
+
+				// Construct virtual URI
+				virtualURI := strings.TrimSuffix(virtualRoot, "/") + "/" + relativePath
+				return virtualURI, true
+			}
+
+		case "s3":
+			// For S3 paths, check if realPath starts with the configured S3 URI
+			if realPath == config.Real {
+				// Exact match - return the virtual root
+				return virtualRoot, true
+			} else if strings.HasPrefix(realPath, config.Real+"/") {
+				// Path is within this S3 root - construct virtual URI with relative path
+				relativePath := strings.TrimPrefix(realPath, config.Real+"/")
+
+				// Construct virtual URI
+				virtualURI := strings.TrimSuffix(virtualRoot, "/") + "/" + relativePath
+				return virtualURI, true
+			}
+		}
+	}
+
+	// No matching root found
+	return "", false
 }
 
 // validatePath performs comprehensive path validation and sanitization
