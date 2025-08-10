@@ -349,6 +349,86 @@ func TestS3ReadOnlyWithArtifactsPrefix(t *testing.T) {
 	}
 }
 
+// TestCaseInsensitiveURIMatching tests case-insensitive URI matching
+func TestCaseInsensitiveURIMatching(t *testing.T) {
+	tempDir := t.TempDir()
+
+	configs := []RootConfig{
+		{
+			Name:     "repo",
+			Type:     "fs",
+			Virtual:  "mcp://repo/",
+			Real:     tempDir,
+			ReadOnly: true,
+		},
+		{
+			Name:     "artifacts",
+			Type:     "fs",
+			Virtual:  "mcp://ARTIFACTS/", // Mixed case virtual root
+			Real:     tempDir,
+			ReadOnly: false,
+		},
+	}
+
+	mapper, err := NewRootMapper(configs, nil)
+	if err != nil {
+		t.Fatalf("Failed to create root mapper: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		virtualURI  string
+		expectError bool
+	}{
+		{
+			name:        "lowercase repo URI",
+			virtualURI:  "mcp://repo/test.txt",
+			expectError: false,
+		},
+		{
+			name:        "uppercase repo URI",
+			virtualURI:  "mcp://REPO/test.txt",
+			expectError: false,
+		},
+		{
+			name:        "mixed case repo URI",
+			virtualURI:  "mcp://Repo/test.txt",
+			expectError: false,
+		},
+		{
+			name:        "lowercase artifacts URI",
+			virtualURI:  "mcp://artifacts/build.zip",
+			expectError: false,
+		},
+		{
+			name:        "uppercase artifacts URI",
+			virtualURI:  "mcp://ARTIFACTS/build.zip",
+			expectError: false,
+		},
+		{
+			name:        "mixed case artifacts URI",
+			virtualURI:  "mcp://Artifacts/build.zip",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := mapper.MapURI(context.Background(), tt.virtualURI, "tenant1")
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for URI %s but got none", tt.virtualURI)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for URI %s: %v", tt.virtualURI, err)
+				}
+			}
+		})
+	}
+}
+
 // TestIntegratedSecurityValidation tests the complete security validation pipeline
 func TestIntegratedSecurityValidation(t *testing.T) {
 	tempDir := t.TempDir()

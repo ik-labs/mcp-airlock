@@ -124,18 +124,27 @@ func (rm *rootMapper) MapURI(ctx context.Context, virtualURI string, tenant stri
 	}
 
 	// Validate URI scheme whitelist (R19.1, R19.2)
+	// Normalize scheme and host for case-insensitive matching
 	parsedURI.Scheme = strings.ToLower(parsedURI.Scheme)
+	parsedURI.Host = strings.ToLower(parsedURI.Host)
 	if err := rm.validateURIScheme(parsedURI); err != nil {
 		return nil, fmt.Errorf("URI scheme validation failed: %w", err)
 	}
+	// Create normalized URI for case-insensitive matching
+	normalizedURI := strings.ToLower(strings.TrimSpace(parsedURI.Scheme + "://" + parsedURI.Host + parsedURI.Path))
+
 	// Find matching root configuration
 	var rootConfig *RootConfig
 	var relativePath string
 
 	for virtualRoot, config := range rm.roots {
-		if strings.HasPrefix(virtualURI, virtualRoot) {
+		// Normalize the virtual root for comparison
+		normalizedRoot := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(virtualRoot, "/")))
+		normalizedURIForComparison := strings.TrimSuffix(normalizedURI, "/")
+
+		if strings.HasPrefix(normalizedURIForComparison, normalizedRoot) {
 			rootConfig = config
-			// Extract relative path after the virtual root
+			// Extract relative path using the original URI to preserve case
 			relativePath = strings.TrimPrefix(virtualURI, virtualRoot)
 			relativePath = strings.TrimPrefix(relativePath, "/")
 			break
@@ -301,13 +310,15 @@ func (rm *rootMapper) validateURIScheme(parsedURI *url.URL) error {
 
 	// For mcp:// scheme, validate against configured virtual roots
 	if parsedURI.Scheme == "mcp" {
-		// Reconstruct the full URI path for validation
+		// Reconstruct the full URI path for validation (already normalized)
 		fullURI := parsedURI.Scheme + "://" + parsedURI.Host + parsedURI.Path
+		normalizedFullURI := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(fullURI, "/")))
 
 		// Check if the URI matches any configured virtual root
 		allowed := false
 		for virtualRoot := range rm.roots {
-			if strings.HasPrefix(fullURI, virtualRoot) {
+			normalizedRoot := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(virtualRoot, "/")))
+			if strings.HasPrefix(normalizedFullURI, normalizedRoot) {
 				allowed = true
 				break
 			}
