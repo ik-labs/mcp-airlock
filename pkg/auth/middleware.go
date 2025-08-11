@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -37,10 +38,31 @@ type TokenValidator interface {
 	ValidateToken(ctx context.Context, tokenString string) (*Claims, error)
 }
 
+// AuditLogger interface for logging authentication events
+type AuditLogger interface {
+	LogEvent(ctx context.Context, event *AuthenticationAuditEvent) error
+}
+
+// AuthenticationAuditEvent represents an authentication audit event
+type AuthenticationAuditEvent struct {
+	ID            string                 `json:"id"`
+	Timestamp     time.Time              `json:"timestamp"`
+	CorrelationID string                 `json:"correlation_id"`
+	Tenant        string                 `json:"tenant"`
+	Subject       string                 `json:"subject"`
+	Action        string                 `json:"action"`
+	Resource      string                 `json:"resource"`
+	Decision      string                 `json:"decision"`
+	Reason        string                 `json:"reason"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	LatencyMs     int64                  `json:"latency_ms,omitempty"`
+}
+
 // Middleware provides authentication middleware for HTTP requests
 type Middleware struct {
 	authenticator TokenValidator
 	logger        *zap.Logger
+	auditLogger   AuditLogger
 	skipPaths     []string // Paths to skip authentication (e.g., health checks)
 }
 
@@ -53,9 +75,17 @@ func NewMiddleware(authenticator TokenValidator, logger *zap.Logger) *Middleware
 	}
 }
 
+// SetAuditLogger sets the audit logger for authentication events
+func (m *Middleware) SetAuditLogger(auditLogger AuditLogger) {
+	m.auditLogger = auditLogger
+}
+
 // HTTPMiddleware returns an HTTP middleware function that validates JWT tokens
 func (m *Middleware) HTTPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		correlationID := m.getOrGenerateCorrelationID(r)
+
 		// Skip authentication for certain paths
 		if m.shouldSkipAuth(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -65,22 +95,42 @@ func (m *Middleware) HTTPMiddleware(next http.Handler) http.Handler {
 		// Extract token from Authorization header
 		token, err := m.extractToken(r)
 		if err != nil {
+			duration := time.Since(start)
 			m.logger.Warn("Token extraction failed",
 				zap.Error(err),
 				zap.String("path", r.URL.Path),
-				zap.String("method", r.Method))
-			m.writeAuthError(w, "missing or invalid authorization header", "")
+				zap.String("method", r.Method),
+				zap.String("correlation_id", correlationID))
+
+			// Log authentication failure audit event
+			m.logAuthenticationEvent(r.Context(), correlationID, "", "deny", err.Error(), duration, map[string]interface{}{
+				"path":   r.URL.Path,
+				"method": r.Method,
+				"error":  "token_extraction_failed",
+			})
+
+			m.writeAuthError(w, "missing or invalid authorization header", correlationID)
 			return
 		}
 
 		// Validate token
 		claims, err := m.authenticator.ValidateToken(r.Context(), token)
 		if err != nil {
+			duration := time.Since(start)
 			m.logger.Warn("Token validation failed",
 				zap.Error(err),
 				zap.String("path", r.URL.Path),
-				zap.String("method", r.Method))
-			m.writeAuthError(w, "invalid token", "")
+				zap.String("method", r.Method),
+				zap.String("correlation_id", correlationID))
+
+			// Log authentication failure audit event
+			m.logAuthenticationEvent(r.Context(), correlationID, "", "deny", err.Error(), duration, map[string]interface{}{
+				"path":   r.URL.Path,
+				"method": r.Method,
+				"error":  "token_validation_failed",
+			})
+
+			m.writeAuthError(w, "invalid token", correlationID)
 			return
 		}
 
@@ -98,6 +148,8 @@ func (m *Middleware) HTTPMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
 		ctx = context.WithValue(ctx, SessionContextKey, session)
 
+		duration := time.Since(start)
+
 		// Log successful authentication
 		m.logger.Info("Request authenticated",
 			zap.String("subject", claims.Subject),
@@ -105,7 +157,17 @@ func (m *Middleware) HTTPMiddleware(next http.Handler) http.Handler {
 			zap.Strings("groups", claims.Groups),
 			zap.String("path", r.URL.Path),
 			zap.String("method", r.Method),
-			zap.String("session_id", session.ID))
+			zap.String("session_id", session.ID),
+			zap.String("correlation_id", correlationID))
+
+		// Log authentication success audit event
+		m.logAuthenticationEvent(ctx, correlationID, claims.Subject, "allow", "authentication_successful", duration, map[string]interface{}{
+			"path":       r.URL.Path,
+			"method":     r.Method,
+			"tenant":     claims.Tenant,
+			"groups":     claims.Groups,
+			"session_id": session.ID,
+		})
 
 		// Continue with authenticated request
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -252,4 +314,52 @@ func generateCorrelationID() string {
 func writeJSON(w http.ResponseWriter, data interface{}) error {
 	encoder := json.NewEncoder(w)
 	return encoder.Encode(data)
+}
+
+// getOrGenerateCorrelationID gets correlation ID from request or generates one
+func (m *Middleware) getOrGenerateCorrelationID(r *http.Request) string {
+	// Try to get from header first
+	if id := r.Header.Get("X-Correlation-ID"); id != "" {
+		return id
+	}
+	// Try to get from context
+	if id := r.Context().Value("correlation_id"); id != nil {
+		if idStr, ok := id.(string); ok {
+			return idStr
+		}
+	}
+	// Generate new one
+	return generateCorrelationID()
+}
+
+// logAuthenticationEvent logs an authentication event for audit purposes
+func (m *Middleware) logAuthenticationEvent(ctx context.Context, correlationID, subject, decision, reason string, latency time.Duration, metadata map[string]interface{}) {
+	if m.auditLogger == nil {
+		return // No audit logger configured
+	}
+
+	event := &AuthenticationAuditEvent{
+		ID:            generateCorrelationID(), // Generate unique event ID
+		Timestamp:     time.Now().UTC(),
+		CorrelationID: correlationID,
+		Subject:       subject,
+		Action:        "token_validate",
+		Resource:      "authentication",
+		Decision:      decision,
+		Reason:        reason,
+		Metadata:      metadata,
+		LatencyMs:     latency.Milliseconds(),
+	}
+
+	// Extract tenant from metadata if available
+	if tenant, ok := metadata["tenant"].(string); ok {
+		event.Tenant = tenant
+	}
+
+	// Log the event (don't fail the request if audit logging fails)
+	if err := m.auditLogger.LogEvent(ctx, event); err != nil {
+		m.logger.Warn("Failed to log authentication audit event",
+			zap.String("correlation_id", correlationID),
+			zap.Error(err))
+	}
 }

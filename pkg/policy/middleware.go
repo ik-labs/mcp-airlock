@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,10 +12,31 @@ import (
 	"go.uber.org/zap"
 )
 
+// AuditLogger interface for logging policy events
+type AuditLogger interface {
+	LogEvent(ctx context.Context, event *PolicyAuditEvent) error
+}
+
+// PolicyAuditEvent represents a policy audit event
+type PolicyAuditEvent struct {
+	ID            string                 `json:"id"`
+	Timestamp     time.Time              `json:"timestamp"`
+	CorrelationID string                 `json:"correlation_id"`
+	Tenant        string                 `json:"tenant"`
+	Subject       string                 `json:"subject"`
+	Action        string                 `json:"action"`
+	Resource      string                 `json:"resource"`
+	Decision      string                 `json:"decision"`
+	Reason        string                 `json:"reason"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	LatencyMs     int64                  `json:"latency_ms,omitempty"`
+}
+
 // PolicyMiddleware provides policy enforcement for MCP requests
 type PolicyMiddleware struct {
-	engine PolicyEngine
-	logger *zap.Logger
+	engine      PolicyEngine
+	logger      *zap.Logger
+	auditLogger AuditLogger
 }
 
 // NewPolicyMiddleware creates a new policy middleware
@@ -23,6 +45,11 @@ func NewPolicyMiddleware(engine PolicyEngine, logger *zap.Logger) *PolicyMiddlew
 		engine: engine,
 		logger: logger,
 	}
+}
+
+// SetAuditLogger sets the audit logger for policy events
+func (pm *PolicyMiddleware) SetAuditLogger(auditLogger AuditLogger) {
+	pm.auditLogger = auditLogger
 }
 
 // RequestContext contains the context information for policy evaluation
@@ -77,6 +104,9 @@ func (pm *PolicyMiddleware) EvaluateRequest(ctx context.Context, reqCtx *Request
 
 	// Log policy decision with audit information
 	pm.logPolicyDecision(reqCtx, result)
+
+	// Log audit event
+	pm.logPolicyAuditEvent(ctx, reqCtx, result)
 
 	return result
 }
@@ -178,4 +208,70 @@ func (pm *PolicyMiddleware) CheckPolicyAvailable(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// logPolicyAuditEvent logs a policy decision audit event
+func (pm *PolicyMiddleware) logPolicyAuditEvent(ctx context.Context, reqCtx *RequestContext, result *PolicyResult) {
+	if pm.auditLogger == nil {
+		return // No audit logger configured
+	}
+
+	decision := "deny"
+	reason := "policy_evaluation_failed"
+
+	if result.Error == nil && result.Decision != nil {
+		if result.Decision.Allow {
+			decision = "allow"
+		}
+		reason = result.Decision.Reason
+		if reason == "" {
+			reason = "policy_decision"
+		}
+	} else if result.Error != nil {
+		reason = result.Error.Error()
+	}
+
+	metadata := map[string]interface{}{
+		"tool":         reqCtx.Tool,
+		"method":       reqCtx.Method,
+		"input_digest": result.InputDigest,
+	}
+
+	if result.Decision != nil {
+		metadata["rule_id"] = result.Decision.RuleID
+		if len(result.Decision.Metadata) > 0 {
+			metadata["policy_metadata"] = result.Decision.Metadata
+		}
+	}
+
+	event := &PolicyAuditEvent{
+		ID:            generateEventID(),
+		Timestamp:     time.Now().UTC(),
+		CorrelationID: reqCtx.RequestID,
+		Tenant:        reqCtx.Tenant,
+		Subject:       reqCtx.Subject,
+		Action:        "policy_evaluate",
+		Resource:      reqCtx.Resource,
+		Decision:      decision,
+		Reason:        reason,
+		Metadata:      metadata,
+		LatencyMs:     result.Duration.Milliseconds(),
+	}
+
+	// Log the event (don't fail the request if audit logging fails)
+	if err := pm.auditLogger.LogEvent(ctx, event); err != nil {
+		pm.logger.Warn("Failed to log policy audit event",
+			zap.String("correlation_id", reqCtx.RequestID),
+			zap.Error(err))
+	}
+}
+
+// generateEventID generates a unique event ID
+func generateEventID() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based ID
+		return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(bytes)
 }

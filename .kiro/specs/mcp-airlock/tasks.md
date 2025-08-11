@@ -125,7 +125,7 @@
   - Write unit tests for audit event creation, storage, and hash validation
   - _Requirements: R3.1, R3.3, R8.1, R8.2_
 
-- [ ] 7.2 Integrate audit logging with all security events
+- [x] 7.2 Integrate audit logging with all security events
   - Add audit logging to authentication, authorization, and policy decisions
   - Implement audit event generation for redaction counts and security violations
   - Add structured logging with no raw sensitive data exposure
