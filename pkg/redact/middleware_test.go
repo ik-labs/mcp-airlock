@@ -2,26 +2,40 @@ package redact
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/zap"
 )
 
 // MockAuditLogger implements AuditLogger for testing
+
+// MockAuditLogger implements AuditLogger for testing
 type MockAuditLogger struct {
+	mu     sync.Mutex
 	events []*RedactionAuditEvent
 }
 
 func (m *MockAuditLogger) LogRedactionEvent(ctx context.Context, event *RedactionAuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.events = append(m.events, event)
 	return nil
 }
 
 func (m *MockAuditLogger) GetEvents() []*RedactionAuditEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	return m.events
 }
 
 func (m *MockAuditLogger) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.events = nil
 }
 
@@ -475,7 +489,14 @@ func TestJSONMessageMarshalError(t *testing.T) {
 		t.Error("Expected error for unmarshalable message")
 	}
 
-	if err.Error() != "failed to marshal message for redaction: json: unsupported value: encountered a cycle via map[string]interface {}" {
-		t.Errorf("Unexpected error message: %v", err)
+	// Check for stable, high-level error message components instead of exact string
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "failed to marshal message for redaction") {
+		t.Errorf("Expected error to contain 'failed to marshal message for redaction', got: %v", err)
+	}
+
+	// Check for indication of circular reference/unsupported value
+	if !strings.Contains(errMsg, "cycle") && !strings.Contains(errMsg, "unsupported value") {
+		t.Errorf("Expected error to indicate circular reference or unsupported value, got: %v", err)
 	}
 }

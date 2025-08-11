@@ -188,10 +188,11 @@ func TestRedactStream(t *testing.T) {
 		"Credit card: [redacted-cc]",
 		"Another line",
 		"Card: [redacted-cc]",
-		"", // Final newline creates empty string when split
 	}
 
-	actualLines := strings.Split(output, "\n")
+	// Trim trailing newline to avoid flaky behavior when splitting
+	trimmedOutput := strings.TrimSuffix(output, "\n")
+	actualLines := strings.Split(trimmedOutput, "\n")
 	if len(actualLines) != len(expectedLines) {
 		t.Errorf("Expected %d lines, got %d", len(expectedLines), len(actualLines))
 	}

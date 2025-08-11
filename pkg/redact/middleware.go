@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,7 +18,8 @@ type RedactionMiddleware struct {
 	// Audit tracking
 	auditLogger AuditLogger
 
-	// Configuration
+	// Configuration (protected by configMu)
+	configMu          sync.RWMutex
 	enabled           bool
 	redactRequests    bool
 	redactResponses   bool
@@ -88,7 +90,12 @@ func (rm *RedactionMiddleware) SetAuditLogger(auditLogger AuditLogger) {
 
 // ProcessRequest applies redaction to request data before logging and proxying
 func (rm *RedactionMiddleware) ProcessRequest(ctx context.Context, data []byte) ([]byte, error) {
-	if !rm.enabled || !rm.redactRequests {
+	rm.configMu.RLock()
+	enabled := rm.enabled
+	redactRequests := rm.redactRequests
+	rm.configMu.RUnlock()
+
+	if !enabled || !redactRequests {
 		return data, nil
 	}
 
@@ -129,7 +136,12 @@ func (rm *RedactionMiddleware) ProcessRequest(ctx context.Context, data []byte) 
 
 // ProcessResponse applies redaction to response data before logging
 func (rm *RedactionMiddleware) ProcessResponse(ctx context.Context, data []byte) ([]byte, error) {
-	if !rm.enabled || !rm.redactResponses {
+	rm.configMu.RLock()
+	enabled := rm.enabled
+	redactResponses := rm.redactResponses
+	rm.configMu.RUnlock()
+
+	if !enabled || !redactResponses {
 		return data, nil
 	}
 
@@ -170,12 +182,18 @@ func (rm *RedactionMiddleware) ProcessResponse(ctx context.Context, data []byte)
 
 // ProcessJSONMessage applies redaction to JSON-RPC messages
 func (rm *RedactionMiddleware) ProcessJSONMessage(ctx context.Context, message map[string]interface{}, direction string) (map[string]interface{}, error) {
-	if !rm.enabled {
+	rm.configMu.RLock()
+	enabled := rm.enabled
+	redactRequests := rm.redactRequests
+	redactResponses := rm.redactResponses
+	rm.configMu.RUnlock()
+
+	if !enabled {
 		return message, nil
 	}
 
 	// Skip redaction if not configured for this direction
-	if (direction == "request" && !rm.redactRequests) || (direction == "response" && !rm.redactResponses) {
+	if (direction == "request" && !redactRequests) || (direction == "response" && !redactResponses) {
 		return message, nil
 	}
 
@@ -235,7 +253,12 @@ func (rm *RedactionMiddleware) ProcessJSONMessage(ctx context.Context, message m
 
 // RedactForLogging applies redaction specifically for logging purposes
 func (rm *RedactionMiddleware) RedactForLogging(ctx context.Context, data []byte) ([]byte, error) {
-	if !rm.enabled || !rm.redactBeforeLog {
+	rm.configMu.RLock()
+	enabled := rm.enabled
+	redactBeforeLog := rm.redactBeforeLog
+	rm.configMu.RUnlock()
+
+	if !enabled || !redactBeforeLog {
 		return data, nil
 	}
 
@@ -253,7 +276,12 @@ func (rm *RedactionMiddleware) RedactForLogging(ctx context.Context, data []byte
 
 // RedactForProxy applies redaction specifically before proxying to upstream
 func (rm *RedactionMiddleware) RedactForProxy(ctx context.Context, data []byte) ([]byte, error) {
-	if !rm.enabled || !rm.redactBeforeProxy {
+	rm.configMu.RLock()
+	enabled := rm.enabled
+	redactBeforeProxy := rm.redactBeforeProxy
+	rm.configMu.RUnlock()
+
+	if !enabled || !redactBeforeProxy {
 		return data, nil
 	}
 
@@ -267,6 +295,7 @@ func (rm *RedactionMiddleware) RedactForProxy(ctx context.Context, data []byte) 
 
 // GetStats returns middleware statistics
 func (rm *RedactionMiddleware) GetStats() map[string]interface{} {
+	rm.configMu.RLock()
 	stats := map[string]interface{}{
 		"enabled":             rm.enabled,
 		"redact_requests":     rm.redactRequests,
@@ -274,6 +303,7 @@ func (rm *RedactionMiddleware) GetStats() map[string]interface{} {
 		"redact_before_log":   rm.redactBeforeLog,
 		"redact_before_proxy": rm.redactBeforeProxy,
 	}
+	rm.configMu.RUnlock()
 
 	// Include redactor stats if available
 	if rm.redactor != nil {
@@ -289,18 +319,27 @@ func (rm *RedactionMiddleware) UpdateConfig(config *MiddlewareConfig) {
 		return
 	}
 
+	rm.configMu.Lock()
 	rm.enabled = config.Enabled
 	rm.redactRequests = config.RedactRequests
 	rm.redactResponses = config.RedactResponses
 	rm.redactBeforeLog = config.RedactBeforeLog
 	rm.redactBeforeProxy = config.RedactBeforeProxy
 
+	// Capture values for logging while holding the lock
+	enabled := rm.enabled
+	redactRequests := rm.redactRequests
+	redactResponses := rm.redactResponses
+	redactBeforeLog := rm.redactBeforeLog
+	redactBeforeProxy := rm.redactBeforeProxy
+	rm.configMu.Unlock()
+
 	rm.logger.Info("Redaction middleware configuration updated",
-		zap.Bool("enabled", rm.enabled),
-		zap.Bool("redact_requests", rm.redactRequests),
-		zap.Bool("redact_responses", rm.redactResponses),
-		zap.Bool("redact_before_log", rm.redactBeforeLog),
-		zap.Bool("redact_before_proxy", rm.redactBeforeProxy),
+		zap.Bool("enabled", enabled),
+		zap.Bool("redact_requests", redactRequests),
+		zap.Bool("redact_responses", redactResponses),
+		zap.Bool("redact_before_log", redactBeforeLog),
+		zap.Bool("redact_before_proxy", redactBeforeProxy),
 	)
 }
 

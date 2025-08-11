@@ -286,7 +286,7 @@ func (rm *RedactionMonitor) generateRecommendations(report *MonitoringReport) []
 					name, stats.Effectiveness*100))
 		}
 
-		if stats.TotalMatches == 0 && time.Since(stats.LastUsed) > 24*time.Hour {
+		if stats.TotalMatches == 0 && !stats.LastUsed.IsZero() && time.Since(stats.LastUsed) > 24*time.Hour {
 			recommendations = append(recommendations,
 				fmt.Sprintf("Pattern '%s' has not been used recently. Consider removal if no longer needed.",
 					name))

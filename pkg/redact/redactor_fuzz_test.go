@@ -8,9 +8,7 @@ import (
 
 // FuzzRedactRequest tests redaction with random input data
 func FuzzRedactRequest(f *testing.F) {
-	redactor := NewRedactor()
-
-	// Load common patterns for fuzzing
+	// Define common patterns for fuzzing (moved outside to avoid recompilation)
 	patterns := []Pattern{
 		{
 			Name:    "email",
@@ -34,11 +32,6 @@ func FuzzRedactRequest(f *testing.F) {
 		},
 	}
 
-	err := redactor.LoadPatterns(patterns)
-	if err != nil {
-		f.Fatalf("LoadPatterns failed: %v", err)
-	}
-
 	// Seed with some test cases
 	f.Add([]byte("test@example.com"))
 	f.Add([]byte("555-123-4567"))
@@ -52,6 +45,13 @@ func FuzzRedactRequest(f *testing.F) {
 		// Skip invalid UTF-8 sequences that might cause issues
 		if !utf8.Valid(data) {
 			t.Skip("Invalid UTF-8 sequence")
+		}
+
+		// Create fresh redactor for each iteration to avoid shared state
+		redactor := NewRedactor()
+		err := redactor.LoadPatterns(patterns)
+		if err != nil {
+			t.Fatalf("LoadPatterns failed: %v", err)
 		}
 
 		// Test redaction doesn't panic or error on arbitrary input
@@ -160,19 +160,13 @@ func FuzzLoadPatterns(f *testing.F) {
 
 // FuzzRedactLargeInput tests redaction with large input sizes
 func FuzzRedactLargeInput(f *testing.F) {
-	redactor := NewRedactor()
-
+	// Define pattern outside to avoid recompilation
 	patterns := []Pattern{
 		{
 			Name:    "simple",
 			Regex:   `test`,
 			Replace: "[redacted]",
 		},
-	}
-
-	err := redactor.LoadPatterns(patterns)
-	if err != nil {
-		f.Fatalf("LoadPatterns failed: %v", err)
 	}
 
 	// Seed with various sizes
@@ -187,6 +181,13 @@ func FuzzRedactLargeInput(f *testing.F) {
 		// Limit size to prevent excessive memory usage
 		if size < 0 || size > 1000000 {
 			t.Skip("Size out of reasonable range")
+		}
+
+		// Create fresh redactor for each iteration to avoid shared state
+		redactor := NewRedactor()
+		err := redactor.LoadPatterns(patterns)
+		if err != nil {
+			t.Fatalf("LoadPatterns failed: %v", err)
 		}
 
 		// Create input data of specified size
@@ -221,8 +222,7 @@ func FuzzRedactLargeInput(f *testing.F) {
 
 // FuzzRedactSpecialCharacters tests redaction with special characters
 func FuzzRedactSpecialCharacters(f *testing.F) {
-	redactor := NewRedactor()
-
+	// Define patterns outside to avoid recompilation
 	patterns := []Pattern{
 		{
 			Name:    "word",
@@ -234,11 +234,6 @@ func FuzzRedactSpecialCharacters(f *testing.F) {
 			Regex:   `\d+`,
 			Replace: "[digit]",
 		},
-	}
-
-	err := redactor.LoadPatterns(patterns)
-	if err != nil {
-		f.Fatalf("LoadPatterns failed: %v", err)
 	}
 
 	// Seed with various special character combinations
@@ -258,6 +253,13 @@ func FuzzRedactSpecialCharacters(f *testing.F) {
 		// Skip invalid UTF-8
 		if !utf8.Valid(data) {
 			t.Skip("Invalid UTF-8 sequence")
+		}
+
+		// Create fresh redactor for each iteration to avoid shared state
+		redactor := NewRedactor()
+		err := redactor.LoadPatterns(patterns)
+		if err != nil {
+			t.Fatalf("LoadPatterns failed: %v", err)
 		}
 
 		result, err := redactor.RedactRequest(context.Background(), data)
