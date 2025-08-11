@@ -95,22 +95,22 @@
   - Write end-to-end tests for virtual root access patterns
   - _Requirements: R4.1, R4.4, R4.5_
 
-- [ ] 6. DLP redaction and data protection
-- [ ] 6.1 Create memory-efficient redaction engine
+- [x] 6. DLP redaction and data protection
+- [x] 6.1 Create memory-efficient redaction engine
   - Implement Redactor with sync.Pool for buffer reuse and compiled regex patterns
   - Add streaming redaction to avoid buffering large payloads
   - Create configurable redaction patterns with fuzzing tests for edge cases
   - Write benchmarks for redaction performance with memory allocation tracking
   - _Requirements: R3.2, R3.4, R15.2_
 
-- [ ] 6.2 Integrate redaction with request/response processing
+- [x] 6.2 Integrate redaction with request/response processing
   - Add redaction middleware to MCP server processing chain
   - Implement redaction before logging and before proxying to upstream
   - Add redaction count tracking for audit purposes
   - Write integration tests for request/response redaction scenarios
   - _Requirements: R3.2, R3.4_
 
-- [ ] 6.3 Add redaction monitoring and validation
+- [x] 6.3 Add redaction monitoring and validation
   - Implement redaction effectiveness monitoring and false-positive tracking
   - Add unit tests for redaction patterns with documented false-positive budget
   - Create performance benchmarks for redaction overhead
