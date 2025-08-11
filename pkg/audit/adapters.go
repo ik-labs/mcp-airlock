@@ -3,25 +3,15 @@ package audit
 import (
 	"context"
 	"time"
+
+	"github.com/ik-labs/mcp-airlock/pkg/auth"
+	"github.com/ik-labs/mcp-airlock/pkg/policy"
+	"github.com/ik-labs/mcp-airlock/pkg/redact"
 )
 
 // RedactionAuditAdapter adapts the SecurityAuditLogger to the redaction middleware's AuditLogger interface
 type RedactionAuditAdapter struct {
 	securityLogger *SecurityAuditLogger
-}
-
-// RedactionAuditEvent represents a redaction event for audit purposes (from redaction middleware)
-type RedactionAuditEvent struct {
-	CorrelationID  string         `json:"correlation_id"`
-	Tenant         string         `json:"tenant"`
-	Subject        string         `json:"subject"`
-	Tool           string         `json:"tool"`
-	Direction      string         `json:"direction"` // "request" or "response"
-	RedactionCount int            `json:"redaction_count"`
-	PatternsHit    map[string]int `json:"patterns_hit"`
-	ProcessingTime time.Duration  `json:"processing_time"`
-	Timestamp      time.Time      `json:"timestamp"`
-	DataSize       int            `json:"data_size"`
 }
 
 // NewRedactionAuditAdapter creates a new redaction audit adapter
@@ -32,7 +22,7 @@ func NewRedactionAuditAdapter(securityLogger *SecurityAuditLogger) *RedactionAud
 }
 
 // LogRedactionEvent implements the redaction middleware's AuditLogger interface
-func (raa *RedactionAuditAdapter) LogRedactionEvent(ctx context.Context, event *RedactionAuditEvent) error {
+func (raa *RedactionAuditAdapter) LogRedactionEvent(ctx context.Context, event *redact.RedactionAuditEvent) error {
 	return raa.securityLogger.LogRedactionEvent(
 		ctx,
 		event.CorrelationID,
@@ -52,21 +42,6 @@ type AuthenticationAuditAdapter struct {
 	securityLogger *SecurityAuditLogger
 }
 
-// AuthenticationAuditEvent represents an authentication audit event (from auth middleware)
-type AuthenticationAuditEvent struct {
-	ID            string                 `json:"id"`
-	Timestamp     time.Time              `json:"timestamp"`
-	CorrelationID string                 `json:"correlation_id"`
-	Tenant        string                 `json:"tenant"`
-	Subject       string                 `json:"subject"`
-	Action        string                 `json:"action"`
-	Resource      string                 `json:"resource"`
-	Decision      string                 `json:"decision"`
-	Reason        string                 `json:"reason"`
-	Metadata      map[string]interface{} `json:"metadata"`
-	LatencyMs     int64                  `json:"latency_ms,omitempty"`
-}
-
 // NewAuthenticationAuditAdapter creates a new authentication audit adapter
 func NewAuthenticationAuditAdapter(securityLogger *SecurityAuditLogger) *AuthenticationAuditAdapter {
 	return &AuthenticationAuditAdapter{
@@ -75,7 +50,7 @@ func NewAuthenticationAuditAdapter(securityLogger *SecurityAuditLogger) *Authent
 }
 
 // LogEvent implements the auth middleware's AuditLogger interface
-func (aaa *AuthenticationAuditAdapter) LogEvent(ctx context.Context, event *AuthenticationAuditEvent) error {
+func (aaa *AuthenticationAuditAdapter) LogEvent(ctx context.Context, event *auth.AuthenticationAuditEvent) error {
 	latency := time.Duration(event.LatencyMs) * time.Millisecond
 	return aaa.securityLogger.LogAuthenticationEvent(
 		ctx,
@@ -93,21 +68,6 @@ type PolicyAuditAdapter struct {
 	securityLogger *SecurityAuditLogger
 }
 
-// PolicyAuditEvent represents a policy audit event (from policy middleware)
-type PolicyAuditEvent struct {
-	ID            string                 `json:"id"`
-	Timestamp     time.Time              `json:"timestamp"`
-	CorrelationID string                 `json:"correlation_id"`
-	Tenant        string                 `json:"tenant"`
-	Subject       string                 `json:"subject"`
-	Action        string                 `json:"action"`
-	Resource      string                 `json:"resource"`
-	Decision      string                 `json:"decision"`
-	Reason        string                 `json:"reason"`
-	Metadata      map[string]interface{} `json:"metadata"`
-	LatencyMs     int64                  `json:"latency_ms,omitempty"`
-}
-
 // NewPolicyAuditAdapter creates a new policy audit adapter
 func NewPolicyAuditAdapter(securityLogger *SecurityAuditLogger) *PolicyAuditAdapter {
 	return &PolicyAuditAdapter{
@@ -116,7 +76,7 @@ func NewPolicyAuditAdapter(securityLogger *SecurityAuditLogger) *PolicyAuditAdap
 }
 
 // LogEvent implements the policy middleware's AuditLogger interface
-func (paa *PolicyAuditAdapter) LogEvent(ctx context.Context, event *PolicyAuditEvent) error {
+func (paa *PolicyAuditAdapter) LogEvent(ctx context.Context, event *policy.PolicyAuditEvent) error {
 	latency := time.Duration(event.LatencyMs) * time.Millisecond
 	return paa.securityLogger.LogAuthorizationEvent(
 		ctx,

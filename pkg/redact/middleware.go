@@ -417,11 +417,19 @@ func (rm *RedactionMiddleware) getCorrelationID(ctx context.Context) string {
 	if id, ok := ctx.Value(correlationIDKey).(string); ok {
 		return id
 	}
+	// Fallback to string key for compatibility
+	if id, ok := ctx.Value("correlation_id").(string); ok {
+		return id
+	}
 	return "unknown"
 }
 
 func (rm *RedactionMiddleware) getTenant(ctx context.Context) string {
 	if tenant, ok := ctx.Value(tenantKey).(string); ok {
+		return tenant
+	}
+	// Fallback to string key for compatibility
+	if tenant, ok := ctx.Value("tenant").(string); ok {
 		return tenant
 	}
 	return "unknown"
@@ -431,11 +439,19 @@ func (rm *RedactionMiddleware) getSubject(ctx context.Context) string {
 	if subject, ok := ctx.Value(subjectKey).(string); ok {
 		return subject
 	}
+	// Fallback to string key for compatibility
+	if subject, ok := ctx.Value("subject").(string); ok {
+		return subject
+	}
 	return "unknown"
 }
 
 func (rm *RedactionMiddleware) getTool(ctx context.Context) string {
 	if tool, ok := ctx.Value(toolKey).(string); ok {
+		return tool
+	}
+	// Fallback to string key for compatibility
+	if tool, ok := ctx.Value("tool").(string); ok {
 		return tool
 	}
 	return "unknown"
