@@ -147,7 +147,7 @@
   - Write unit tests for error scenarios and deterministic error responses
   - _Requirements: R9.2, R13.1, R20.1, R20.2, R20.3, R20.4, R20.5_
 
-- [ ] 8.2 Add timeout, backpressure, and SSE heartbeat handling
+- [x] 8.2 Add timeout, backpressure, and SSE heartbeat handling
   - Implement configurable timeouts (connect 2s, upstream call 30s) with ALB idle ≥ 120s
   - Add SSE heartbeat every 15-30s to prevent ALB connection drops
   - Add bounded queues for SSE connections with fail-fast on oversized JSON-RPC

@@ -44,13 +44,14 @@ type UpstreamClient struct {
 
 // UpstreamConfig contains configuration for an upstream MCP server
 type UpstreamConfig struct {
-	Name       string            `yaml:"name"`
-	Type       string            `yaml:"type"` // "stdio", "unix"
-	Command    []string          `yaml:"command"`
-	Socket     string            `yaml:"socket"`
-	Env        map[string]string `yaml:"env"`
-	Timeout    time.Duration     `yaml:"timeout"`
-	AllowTools []string          `yaml:"allow_tools"`
+	Name           string            `yaml:"name"`
+	Type           string            `yaml:"type"` // "stdio", "unix"
+	Command        []string          `yaml:"command"`
+	Socket         string            `yaml:"socket"`
+	Env            map[string]string `yaml:"env"`
+	Timeout        time.Duration     `yaml:"timeout"`         // Request timeout
+	ConnectTimeout time.Duration     `yaml:"connect_timeout"` // Connection timeout
+	AllowTools     []string          `yaml:"allow_tools"`
 }
 
 // NewUpstreamConnector creates a new upstream connector
@@ -62,7 +63,7 @@ func NewUpstreamConnector(logger *zap.Logger, maxClients int) *UpstreamConnector
 	}
 }
 
-// Connect establishes a connection to an upstream MCP server
+// Connect establishes a connection to an upstream MCP server with timeout
 func (uc *UpstreamConnector) Connect(ctx context.Context, config *UpstreamConfig) (*UpstreamClient, error) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
@@ -92,8 +93,17 @@ func (uc *UpstreamConnector) Connect(ctx context.Context, config *UpstreamConfig
 		zap.String("type", config.Type),
 	)
 
+	// Apply connection timeout (default 2s for fast connection)
+	connectTimeout := 2 * time.Second
+	if config.ConnectTimeout > 0 {
+		connectTimeout = config.ConnectTimeout
+	}
+
+	connectCtx, connectCancel := context.WithTimeout(ctx, connectTimeout)
+	defer connectCancel()
+
 	// Create transport based on type
-	transport, err := uc.createTransport(ctx, config)
+	transport, err := uc.createTransport(connectCtx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transport for %s: %w", config.Name, err)
 	}
@@ -119,16 +129,17 @@ func (uc *UpstreamConnector) Connect(ctx context.Context, config *UpstreamConfig
 		createdAt: time.Now(),
 	}
 
-	// Connect the client
-	if err := upstreamClient.connect(clientCtx); err != nil {
+	// Connect the client with timeout
+	if err := upstreamClient.connect(connectCtx); err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to connect to upstream %s: %w", config.Name, err)
+		return nil, fmt.Errorf("failed to connect to upstream %s within %v: %w", config.Name, connectTimeout, err)
 	}
 
 	uc.clients[config.Name] = upstreamClient
 
 	uc.logger.Info("Successfully connected to upstream server",
 		zap.String("name", config.Name),
+		zap.Duration("connect_time", time.Since(time.Now().Add(-connectTimeout))),
 		zap.Int("total_clients", len(uc.clients)),
 	)
 

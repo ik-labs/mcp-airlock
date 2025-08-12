@@ -39,18 +39,20 @@ type TLSConfig struct {
 
 // TimeoutConfig contains server timeout configuration
 type TimeoutConfig struct {
-	Read  time.Duration `yaml:"read" validate:"required"`
-	Write time.Duration `yaml:"write" validate:"required"`
-	Idle  time.Duration `yaml:"idle" validate:"required"`
+	Read     time.Duration `yaml:"read" validate:"required"`
+	Write    time.Duration `yaml:"write" validate:"required"`
+	Idle     time.Duration `yaml:"idle" validate:"required"`
+	Connect  time.Duration `yaml:"connect"`  // Connection timeout (default 2s)
+	Upstream time.Duration `yaml:"upstream"` // Upstream call timeout (default 30s)
 }
 
 // AuthConfig contains authentication configuration
 type AuthConfig struct {
-	OIDCIssuer      string        `mapstructure:"oidc_issuer"`
-	Audience        string        `mapstructure:"audience"`
-	JWKSCacheTTL    time.Duration `mapstructure:"jwks_cache_ttl"`
-	ClockSkew       time.Duration `mapstructure:"clock_skew"`
-	RequiredGroups  []string      `mapstructure:"required_groups"`
+	OIDCIssuer     string        `mapstructure:"oidc_issuer"`
+	Audience       string        `mapstructure:"audience"`
+	JWKSCacheTTL   time.Duration `mapstructure:"jwks_cache_ttl"`
+	ClockSkew      time.Duration `mapstructure:"clock_skew"`
+	RequiredGroups []string      `mapstructure:"required_groups"`
 }
 
 // PolicyConfig contains policy engine configuration
@@ -91,14 +93,15 @@ type RateLimitingConfig struct {
 
 // UpstreamConfig contains upstream MCP server configuration
 type UpstreamConfig struct {
-	Name       string            `yaml:"name" validate:"required"`
-	Type       string            `yaml:"type" validate:"required,oneof=stdio unix http"`
-	Command    []string          `yaml:"command"`
-	Socket     string            `yaml:"socket"`
-	URL        string            `yaml:"url"`
-	Env        map[string]string `yaml:"env"`
-	Timeout    time.Duration     `yaml:"timeout" validate:"required"`
-	AllowTools []string          `yaml:"allow_tools"`
+	Name           string            `yaml:"name" validate:"required"`
+	Type           string            `yaml:"type" validate:"required,oneof=stdio unix http"`
+	Command        []string          `yaml:"command"`
+	Socket         string            `yaml:"socket"`
+	URL            string            `yaml:"url"`
+	Env            map[string]string `yaml:"env"`
+	Timeout        time.Duration     `yaml:"timeout" validate:"required"`
+	ConnectTimeout time.Duration     `yaml:"connect_timeout"`
+	AllowTools     []string          `yaml:"allow_tools"`
 }
 
 // AuditConfig contains audit logging configuration
@@ -171,11 +174,11 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 func (l *Loader) validate(config *Config) error {
 	// For now, just do minimal validation to get the scaffolding working
 	// More comprehensive validation will be added in later tasks
-	
+
 	if config.Server.Addr == "" {
 		return fmt.Errorf("server.addr is required")
 	}
-	
+
 	// Skip other validations for now to get the basic server running
 	return nil
 }

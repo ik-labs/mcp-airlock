@@ -51,6 +51,10 @@ type Config struct {
 	// Connection limits
 	MaxConnections int
 	MaxClients     int
+
+	// Timeout configuration
+	ConnectTimeout  time.Duration
+	UpstreamTimeout time.Duration
 }
 
 // ServerMetrics holds server metrics
@@ -69,12 +73,14 @@ func DefaultConfig() *Config {
 		Addr:              ":8080",
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		HeartbeatInterval: 20 * time.Second,
-		MaxMessageSize:    256 * 1024, // 256KB
-		MaxQueueSize:      1000,
+		IdleTimeout:       120 * time.Second, // ALB-friendly idle timeout
+		HeartbeatInterval: 20 * time.Second,  // 15-30s range for ALB
+		MaxMessageSize:    256 * 1024,        // 256KB
+		MaxQueueSize:      1000,              // Bounded queue size
 		MaxConnections:    1000,
 		MaxClients:        100,
+		ConnectTimeout:    2 * time.Second,  // Fast connection timeout
+		UpstreamTimeout:   30 * time.Second, // Upstream call timeout
 	}
 }
 
@@ -200,6 +206,7 @@ func (s *AirlockServer) Start(ctx context.Context) error {
 	}
 
 	// Start HTTP server in goroutine
+	serverStarted := make(chan error, 1)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -208,8 +215,27 @@ func (s *AirlockServer) Start(ctx context.Context) error {
 
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.logger.Error("HTTP server error", zap.Error(err))
+			select {
+			case serverStarted <- err:
+			default:
+			}
+		} else {
+			select {
+			case serverStarted <- nil:
+			default:
+			}
 		}
 	}()
+
+	// Give the server a moment to start
+	select {
+	case err := <-serverStarted:
+		if err != nil {
+			return fmt.Errorf("HTTP server failed to start: %w", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Server is likely starting, continue
+	}
 
 	// Start connection cleanup goroutine
 	s.wg.Add(1)
@@ -243,11 +269,15 @@ func (s *AirlockServer) Stop(ctx context.Context) error {
 
 	// Shutdown HTTP server
 	if s.httpServer != nil {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 			s.logger.Error("HTTP server shutdown error", zap.Error(err))
+			// Force close if graceful shutdown fails
+			if closeErr := s.httpServer.Close(); closeErr != nil {
+				s.logger.Error("HTTP server force close error", zap.Error(closeErr))
+			}
 		}
 	}
 

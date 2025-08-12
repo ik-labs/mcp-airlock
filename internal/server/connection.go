@@ -20,7 +20,7 @@ type ClientConnection struct {
 	request *http.Request
 	flusher http.Flusher
 
-	// Message queuing
+	// Message queuing with backpressure
 	outbound chan []byte
 	inbound  chan []byte
 
@@ -34,6 +34,11 @@ type ClientConnection struct {
 	// Configuration
 	maxMessageSize    int64
 	heartbeatInterval time.Duration
+	maxQueueSize      int
+
+	// Backpressure tracking
+	queuedMessages  int64
+	droppedMessages int64
 
 	// Message routing and processing
 	proxy          *RequestProxy
@@ -95,6 +100,7 @@ func (cp *ConnectionPool) CreateConnection(ctx context.Context, id string, w htt
 		lastActivity:      time.Now(),
 		maxMessageSize:    256 * 1024, // 256KB
 		heartbeatInterval: 20 * time.Second,
+		maxQueueSize:      1000, // Maximum queue size for backpressure
 	}
 
 	cp.connections[id] = conn
@@ -234,18 +240,39 @@ func (c *ClientConnection) setupSSEHeaders() {
 	})
 }
 
-// handleSSEWriter handles outbound SSE messages
+// handleSSEWriter handles outbound SSE messages with backpressure
 func (c *ClientConnection) handleSSEWriter() {
 	c.logger.Debug("Starting SSE writer")
 
 	for {
 		select {
 		case message := <-c.outbound:
+			// Fail fast on oversized messages
+			if len(message) > int(c.maxMessageSize) {
+				c.logger.Warn("Message too large, dropping",
+					zap.Int("message_size", len(message)),
+					zap.Int64("max_size", c.maxMessageSize),
+				)
+
+				// Send error response for oversized message
+				errorMsg := c.createOversizedMessageError()
+				if err := c.writeSSEData(errorMsg); err != nil {
+					c.logger.Error("Failed to write oversized message error", zap.Error(err))
+					c.Close()
+					return
+				}
+
+				c.incrementDroppedMessages()
+				continue
+			}
+
 			if err := c.writeSSEData(message); err != nil {
 				c.logger.Error("Failed to write SSE message", zap.Error(err))
 				c.Close()
 				return
 			}
+
+			c.decrementQueuedMessages()
 
 		case <-c.ctx.Done():
 			c.logger.Debug("SSE writer stopping")
@@ -279,16 +306,33 @@ func (c *ClientConnection) handleHeartbeat() {
 	}
 }
 
-// handleRequestReader reads incoming HTTP requests
+// handleRequestReader reads incoming HTTP requests with size limits
 func (c *ClientConnection) handleRequestReader() {
 	c.logger.Debug("Starting request reader")
 
 	// For now, we'll handle POST requests with JSON-RPC messages
 	if c.request.Method == "POST" {
-		body, err := io.ReadAll(io.LimitReader(c.request.Body, c.maxMessageSize))
+		// Use LimitedReader to enforce size limits
+		limitedReader := &io.LimitedReader{R: c.request.Body, N: c.maxMessageSize}
+		body, err := io.ReadAll(limitedReader)
+
 		if err != nil {
 			c.logger.Error("Failed to read request body", zap.Error(err))
+			c.sendErrorResponse(fmt.Errorf("failed to read request body"))
 			c.Close()
+			return
+		}
+
+		// Check if we hit the size limit
+		if limitedReader.N == 0 && len(body) == int(c.maxMessageSize) {
+			c.logger.Warn("Request body too large",
+				zap.Int("body_size", len(body)),
+				zap.Int64("max_size", c.maxMessageSize),
+			)
+
+			// Send oversized request error
+			errorData := c.createOversizedMessageError()
+			c.sendMessage(errorData)
 			return
 		}
 
@@ -360,13 +404,8 @@ func (c *ClientConnection) processMessage(data []byte) error {
 		return err
 	}
 
-	// Send response
-	select {
-	case c.outbound <- responseData:
-		return nil
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	}
+	// Send response with backpressure handling
+	return c.sendMessage(responseData)
 }
 
 // routeToUpstream routes the message to an upstream MCP server
@@ -609,10 +648,98 @@ func (c *ClientConnection) sendErrorResponse(err error) {
 		return
 	}
 
+	c.sendMessage(data)
+}
+
+// sendMessage sends a message with backpressure handling
+func (c *ClientConnection) sendMessage(data []byte) error {
+	// Check if queue is full (backpressure)
+	if c.getQueuedMessages() >= int64(c.maxQueueSize) {
+		c.logger.Warn("Message queue full, dropping oldest message",
+			zap.Int64("queued_messages", c.getQueuedMessages()),
+			zap.Int("max_queue_size", c.maxQueueSize),
+		)
+
+		// Try to drain one message from the queue (drop oldest)
+		select {
+		case <-c.outbound:
+			c.decrementQueuedMessages()
+		default:
+			// Queue is empty or being processed, continue
+		}
+
+		c.incrementDroppedMessages()
+	}
+
+	// Try to send the message
 	select {
 	case c.outbound <- data:
+		c.incrementQueuedMessages()
+		return nil
 	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+		// Channel is full, drop the message
+		c.logger.Warn("Failed to send message, channel full")
+		c.incrementDroppedMessages()
+		return fmt.Errorf("message queue full")
 	}
+}
+
+// createOversizedMessageError creates an error response for oversized messages
+func (c *ClientConnection) createOversizedMessageError() []byte {
+	errorResponse := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"error": map[string]interface{}{
+			"code":    -32001, // Request too large
+			"message": "Message size exceeds maximum allowed",
+			"data": map[string]interface{}{
+				"max_size_bytes": c.maxMessageSize,
+				"correlation_id": getCorrelationID(c.ctx),
+			},
+		},
+	}
+
+	data, err := json.Marshal(errorResponse)
+	if err != nil {
+		c.logger.Error("Failed to marshal oversized message error", zap.Error(err))
+		return []byte(`{"jsonrpc":"2.0","error":{"code":-32001,"message":"Message too large"}}`)
+	}
+
+	return data
+}
+
+// Backpressure tracking methods
+func (c *ClientConnection) incrementQueuedMessages() {
+	c.mu.Lock()
+	c.queuedMessages++
+	c.mu.Unlock()
+}
+
+func (c *ClientConnection) decrementQueuedMessages() {
+	c.mu.Lock()
+	if c.queuedMessages > 0 {
+		c.queuedMessages--
+	}
+	c.mu.Unlock()
+}
+
+func (c *ClientConnection) getQueuedMessages() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.queuedMessages
+}
+
+func (c *ClientConnection) incrementDroppedMessages() {
+	c.mu.Lock()
+	c.droppedMessages++
+	c.mu.Unlock()
+}
+
+func (c *ClientConnection) getDroppedMessages() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.droppedMessages
 }
 
 // updateLastActivity updates the last activity timestamp
