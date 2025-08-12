@@ -154,7 +154,7 @@
   - Write integration tests for timeout scenarios, heartbeat, and message size limits
   - _Requirements: R6.3, R6.4, R9.3_
 
-- [ ] 8.3 Implement health checks and monitoring
+- [x] 8.3 Implement health checks and monitoring
   - Create /live and /ready endpoints with proper dependency checking
   - Add health checks for JWKS fetch, policy compilation, and upstream connectivity
   - Implement critical alerting for audit store failures with event buffering

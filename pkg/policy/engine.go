@@ -313,6 +313,50 @@ func (pe *OPAEngine) hashPolicy(policy string) string {
 	return hex.EncodeToString(h[:])[:8] // Use first 8 chars for logging
 }
 
+// HealthCheck performs a health check on the policy engine
+func (pe *OPAEngine) HealthCheck(ctx context.Context) (string, string) {
+	// Check if we have a current policy
+	currentPolicy := pe.current.Load()
+	lkgPolicy := pe.lkg.Load()
+
+	if currentPolicy == nil && lkgPolicy == nil {
+		return "unhealthy", "No policy loaded (neither current nor Last-Known-Good)"
+	}
+
+	if currentPolicy == nil && lkgPolicy != nil {
+		return "unhealthy", "Current policy unavailable, using Last-Known-Good policy"
+	}
+
+	// Try a simple policy evaluation to verify the engine is working
+	testInput := &PolicyInput{
+		Subject:  "health-check@system",
+		Tenant:   "system",
+		Groups:   []string{"system"},
+		Tool:     "health_check",
+		Resource: "system://health",
+		Method:   "GET",
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	_, err := pe.Evaluate(checkCtx, testInput)
+	if err != nil {
+		return "unhealthy", fmt.Sprintf("Policy evaluation test failed: %v", err)
+	}
+
+	// Check policy source availability for reload
+	pe.mutex.RLock()
+	hasSource := pe.policySource != ""
+	pe.mutex.RUnlock()
+
+	if !hasSource {
+		return "healthy", "Policy engine operational (no reload source configured)"
+	}
+
+	return "healthy", "Policy engine operational with reload capability"
+}
+
 // Close cleans up the policy engine resources
 func (pe *OPAEngine) Close() error {
 	// Clear atomic values

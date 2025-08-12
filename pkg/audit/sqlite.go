@@ -839,6 +839,44 @@ func (s *SQLiteAuditLogger) applyTombstoneRedactionWithMap(event *AuditEvent, to
 	return &redactedEvent
 }
 
+// HealthCheck performs a health check on the SQLite audit logger
+func (s *SQLiteAuditLogger) HealthCheck(ctx context.Context) (string, string) {
+	if s.db == nil {
+		return "unhealthy", "Database connection not initialized"
+	}
+
+	// Test database connectivity with a simple query
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	var count int
+	err := s.db.QueryRowContext(checkCtx, "SELECT COUNT(*) FROM audit_events LIMIT 1").Scan(&count)
+	if err != nil {
+		return "unhealthy", fmt.Sprintf("Database connectivity test failed: %v", err)
+	}
+
+	// Check if we have pending events that might indicate write issues
+	s.bufferMutex.RLock()
+	pendingCount := len(s.eventBuffer)
+	s.bufferMutex.RUnlock()
+
+	if pendingCount > 1000 { // Threshold for concern
+		return "unhealthy", fmt.Sprintf("High number of pending events: %d (possible write issues)", pendingCount)
+	}
+
+	// Check last hash to verify chain integrity
+	_, err = s.GetLastHash(checkCtx)
+	if err != nil {
+		return "unhealthy", fmt.Sprintf("Hash chain verification failed: %v", err)
+	}
+
+	if pendingCount > 0 {
+		return "healthy", fmt.Sprintf("Database operational (%d pending events)", pendingCount)
+	}
+
+	return "healthy", "Database operational, no pending events"
+}
+
 // Close gracefully shuts down the audit logger
 func (s *SQLiteAuditLogger) Close() error {
 	// Stop background routines

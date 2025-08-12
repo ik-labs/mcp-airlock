@@ -243,6 +243,39 @@ func (a *Authenticator) validateAudience(claims *Claims) error {
 	return fmt.Errorf("invalid audience: expected %s, got %v", a.config.Audience, claims.Audience)
 }
 
+// HealthCheck performs a health check on the authenticator
+func (a *Authenticator) HealthCheck(ctx context.Context) (string, string) {
+	// Check if provider is available
+	if a.provider == nil {
+		return "unhealthy", "OIDC provider not initialized"
+	}
+
+	// Check if verifier is available
+	if a.verifier == nil {
+		return "unhealthy", "JWT verifier not initialized"
+	}
+
+	// Try to fetch JWKS to verify connectivity
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Create a test provider to check OIDC endpoint connectivity
+	_, err := oidc.NewProvider(checkCtx, a.config.OIDCIssuer)
+	if err != nil {
+		return "unhealthy", fmt.Sprintf("JWKS fetch failed: %v", err)
+	}
+
+	// Check if background refresh is running
+	select {
+	case <-a.refreshDone:
+		return "unhealthy", "JWKS refresh goroutine stopped unexpectedly"
+	default:
+		// Goroutine is still running
+	}
+
+	return "healthy", "JWKS fetch successful, background refresh active"
+}
+
 // Close stops the background refresh goroutine and cleans up resources
 func (a *Authenticator) Close() error {
 	a.refreshCancel()

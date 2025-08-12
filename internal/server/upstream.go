@@ -314,6 +314,41 @@ func (uc *UpstreamConnector) CleanupStaleClients(maxIdleTime time.Duration) {
 	}
 }
 
+// HealthCheck performs a health check on the upstream connector
+func (uc *UpstreamConnector) HealthCheck(ctx context.Context) (string, string) {
+	uc.mu.RLock()
+	defer uc.mu.RUnlock()
+
+	totalClients := len(uc.clients)
+	connectedClients := 0
+	var unhealthyClients []string
+
+	for name, client := range uc.clients {
+		client.mu.RLock()
+		if client.connected {
+			connectedClients++
+		} else {
+			unhealthyClients = append(unhealthyClients, name)
+		}
+		client.mu.RUnlock()
+	}
+
+	if totalClients == 0 {
+		return "healthy", "No upstream clients configured"
+	}
+
+	if connectedClients == 0 {
+		return "unhealthy", fmt.Sprintf("No upstream clients connected (total: %d)", totalClients)
+	}
+
+	if len(unhealthyClients) > 0 {
+		return "healthy", fmt.Sprintf("Partial connectivity: %d/%d clients connected (unhealthy: %v)",
+			connectedClients, totalClients, unhealthyClients)
+	}
+
+	return "healthy", fmt.Sprintf("All upstream clients connected (%d/%d)", connectedClients, totalClients)
+}
+
 // UpstreamClient methods
 
 // connect establishes the connection to the upstream server

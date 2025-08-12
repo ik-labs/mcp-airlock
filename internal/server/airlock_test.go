@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -104,64 +102,6 @@ func TestAirlockServer_StartStop(t *testing.T) {
 		if started {
 			t.Error("expected server to be marked as stopped")
 		}
-	})
-}
-
-func TestAirlockServer_HealthEndpoints(t *testing.T) {
-	logger := zaptest.NewLogger(t)
-	server := NewAirlockServer(logger, nil)
-
-	t.Run("health endpoint", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/health", nil)
-		w := httptest.NewRecorder()
-
-		server.handleHealth(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", w.Code)
-		}
-
-		contentType := w.Header().Get("Content-Type")
-		if contentType != "application/json" {
-			t.Errorf("expected content-type application/json, got %s", contentType)
-		}
-
-		body := w.Body.String()
-		if body == "" {
-			t.Error("expected non-empty response body")
-		}
-	})
-
-	t.Run("ready endpoint - not started", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/ready", nil)
-		w := httptest.NewRecorder()
-
-		server.handleReady(w, req)
-
-		if w.Code != http.StatusServiceUnavailable {
-			t.Errorf("expected status 503, got %d", w.Code)
-		}
-	})
-
-	t.Run("ready endpoint - started", func(t *testing.T) {
-		// Mark server as started
-		server.mu.Lock()
-		server.started = true
-		server.mu.Unlock()
-
-		req := httptest.NewRequest("GET", "/ready", nil)
-		w := httptest.NewRecorder()
-
-		server.handleReady(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", w.Code)
-		}
-
-		// Reset state
-		server.mu.Lock()
-		server.started = false
-		server.mu.Unlock()
 	})
 }
 

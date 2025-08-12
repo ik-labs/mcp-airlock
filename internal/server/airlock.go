@@ -11,6 +11,25 @@ import (
 	"go.uber.org/zap"
 )
 
+// Import health types (these would be imported from the health package)
+type HealthChecker interface {
+	RegisterCheck(name string, checkFunc func(ctx context.Context) (string, string))
+	RunAllChecks(ctx context.Context)
+	LivenessHandler() http.HandlerFunc
+	ReadinessHandler() http.HandlerFunc
+	StartPeriodicChecks(ctx context.Context, interval time.Duration)
+}
+
+type AlertHandler interface {
+	SendAlert(ctx context.Context, level string, component, message string) error
+}
+
+type BufferedEventHandler interface {
+	BufferEvent(event interface{}) error
+	FlushBufferedEvents(ctx context.Context) error
+	GetBufferedEventCount() int
+}
+
 // AirlockServer implements the core MCP server with security middleware
 type AirlockServer struct {
 	logger      *zap.Logger
@@ -22,6 +41,11 @@ type AirlockServer struct {
 
 	// Security middleware
 	rootMiddleware RootMiddleware
+
+	// Health checking and monitoring
+	healthChecker HealthChecker
+	alertHandler  AlertHandler
+	eventBuffer   BufferedEventHandler
 
 	// Graceful shutdown
 	ctx    context.Context
@@ -365,6 +389,83 @@ func (s *AirlockServer) SetRootMiddleware(middleware RootMiddleware) {
 	s.rootMiddleware = middleware
 }
 
+// SetHealthChecker sets the health checker for the server
+func (s *AirlockServer) SetHealthChecker(healthChecker HealthChecker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.healthChecker = healthChecker
+}
+
+// SetAlertHandler sets the alert handler for the server
+func (s *AirlockServer) SetAlertHandler(alertHandler AlertHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.alertHandler = alertHandler
+}
+
+// SetEventBuffer sets the event buffer for audit store failures
+func (s *AirlockServer) SetEventBuffer(eventBuffer BufferedEventHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.eventBuffer = eventBuffer
+}
+
+// RegisterHealthChecks registers health checks for all components
+func (s *AirlockServer) RegisterHealthChecks(authenticator, policyEngine, auditLogger, upstreamConnector interface{}) {
+	if s.healthChecker == nil {
+		s.logger.Warn("Health checker not set, skipping health check registration")
+		return
+	}
+
+	// Register JWKS health check
+	if auth, ok := authenticator.(interface {
+		HealthCheck(ctx context.Context) (string, string)
+	}); ok {
+		s.healthChecker.RegisterCheck("jwks", func(ctx context.Context) (string, string) {
+			return auth.HealthCheck(ctx)
+		})
+		s.logger.Info("Registered JWKS health check")
+	}
+
+	// Register policy engine health check
+	if policy, ok := policyEngine.(interface {
+		HealthCheck(ctx context.Context) (string, string)
+	}); ok {
+		s.healthChecker.RegisterCheck("policy", func(ctx context.Context) (string, string) {
+			return policy.HealthCheck(ctx)
+		})
+		s.logger.Info("Registered policy engine health check")
+	}
+
+	// Register audit store health check
+	if audit, ok := auditLogger.(interface {
+		HealthCheck(ctx context.Context) (string, string)
+	}); ok {
+		s.healthChecker.RegisterCheck("audit", func(ctx context.Context) (string, string) {
+			status, message := audit.HealthCheck(ctx)
+
+			// If audit store is unhealthy, send critical alert
+			if status == "unhealthy" && s.alertHandler != nil {
+				s.alertHandler.SendAlert(ctx, "critical", "audit_store",
+					fmt.Sprintf("Audit store failure: %s", message))
+			}
+
+			return status, message
+		})
+		s.logger.Info("Registered audit store health check")
+	}
+
+	// Register upstream connectivity health check
+	if upstream, ok := upstreamConnector.(interface {
+		HealthCheck(ctx context.Context) (string, string)
+	}); ok {
+		s.healthChecker.RegisterCheck("upstream", func(ctx context.Context) (string, string) {
+			return upstream.HealthCheck(ctx)
+		})
+		s.logger.Info("Registered upstream connectivity health check")
+	}
+}
+
 // GetMetrics returns server metrics
 func (s *AirlockServer) GetMetrics() map[string]interface{} {
 	return s.metrics.GetStats()
@@ -372,25 +473,37 @@ func (s *AirlockServer) GetMetrics() map[string]interface{} {
 
 // handleHealth handles health check requests
 func (s *AirlockServer) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	// Liveness check - basic functionality
+	if s.healthChecker != nil {
+		s.healthChecker.LivenessHandler()(w, r)
+	} else {
+		// Fallback if health checker not initialized
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	}
 }
 
 // handleReady handles readiness check requests
 func (s *AirlockServer) handleReady(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	ready := s.started
-	s.mu.RUnlock()
-
-	w.Header().Set("Content-Type", "application/json")
-
-	if ready {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	// Readiness check - all dependencies healthy
+	if s.healthChecker != nil {
+		s.healthChecker.ReadinessHandler()(w, r)
 	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"status":"not_ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+		// Fallback readiness check
+		s.mu.RLock()
+		ready := s.started
+		s.mu.RUnlock()
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if ready {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"status":"ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, `{"status":"not_ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+		}
 	}
 }
 
