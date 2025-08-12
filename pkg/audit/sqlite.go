@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -11,6 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
@@ -29,6 +35,9 @@ type SQLiteAuditLogger struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// S3 client for exports
+	s3Client S3Client
 }
 
 // NewSQLiteAuditLogger creates a new SQLite-based audit logger
@@ -42,6 +51,9 @@ func NewSQLiteAuditLogger(config *AuditConfig) (*SQLiteAuditLogger, error) {
 	}
 	if config.RetentionDays == 0 {
 		config.RetentionDays = 30
+	}
+	if config.CleanupInterval == 0 {
+		config.CleanupInterval = 24 * time.Hour // Daily cleanup by default
 	}
 
 	// Open SQLite database with WAL mode for performance
@@ -85,9 +97,22 @@ func NewSQLiteAuditLogger(config *AuditConfig) (*SQLiteAuditLogger, error) {
 	}
 	logger.hasher = hasher
 
-	// Start background flush routine
+	// Initialize S3 client if S3 settings are provided
+	if config.S3Bucket != "" {
+		awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(config.S3Region))
+		if err != nil {
+			logger.Close()
+			return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		}
+		logger.s3Client = s3.NewFromConfig(awsConfig)
+	}
+
+	// Start background routines
 	logger.wg.Add(1)
 	go logger.flushRoutine()
+
+	logger.wg.Add(1)
+	go logger.cleanupRoutine()
 
 	return logger, nil
 }
@@ -131,6 +156,14 @@ func (s *SQLiteAuditLogger) initSchema() error {
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL,
 		created_at INTEGER DEFAULT (strftime('%s', 'now'))
+	);
+	
+	-- Table for tracking tombstoned subjects
+	CREATE TABLE IF NOT EXISTS audit_tombstones (
+		subject TEXT PRIMARY KEY,
+		tombstone_event_id TEXT NOT NULL,
+		created_at INTEGER DEFAULT (strftime('%s', 'now')),
+		reason TEXT NOT NULL
 	);
 	`
 
@@ -285,6 +318,12 @@ func (s *SQLiteAuditLogger) flushBuffer() error {
 
 // Query retrieves audit events based on filter criteria
 func (s *SQLiteAuditLogger) Query(ctx context.Context, filter *QueryFilter) ([]*AuditEvent, error) {
+	// Load tombstoned subjects first
+	tombstones, err := s.loadTombstones(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tombstones: %w", err)
+	}
+
 	query := "SELECT id, timestamp, correlation_id, tenant, subject, action, resource, decision, reason, metadata, hash, previous_hash, latency_ms, redaction_count FROM audit_events"
 	args := []interface{}{}
 	conditions := []string{}
@@ -386,6 +425,11 @@ func (s *SQLiteAuditLogger) Query(ctx context.Context, filter *QueryFilter) ([]*
 				// Log error but don't fail the query
 				event.Metadata = map[string]interface{}{"parse_error": err.Error()}
 			}
+		}
+
+		// Check if subject has been tombstoned and redact if necessary
+		if event.Action != ActionTombstone {
+			event = s.applyTombstoneRedactionWithMap(event, tombstones)
 		}
 
 		events = append(events, event)
@@ -497,6 +541,305 @@ func (s *SQLiteAuditLogger) flushRoutine() {
 			s.bufferMutex.Unlock()
 		}
 	}
+}
+
+// cleanupRoutine runs in the background to periodically clean up expired events
+func (s *SQLiteAuditLogger) cleanupRoutine() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.config.CleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+
+		case <-ticker.C:
+			if deleted, err := s.CleanupExpiredEvents(s.ctx); err != nil {
+				// Log error but continue running
+				fmt.Printf("Retention cleanup failed: %v\n", err)
+			} else if deleted > 0 {
+				// Log successful cleanup
+				correlationID := uuid.New().String()
+				cutoffTime := time.Now().UTC().AddDate(0, 0, -s.config.RetentionDays)
+				cleanupEvent := NewRetentionCleanupEvent(correlationID, deleted, cutoffTime)
+				s.LogEvent(s.ctx, cleanupEvent)
+			}
+		}
+	}
+}
+
+// CleanupExpiredEvents removes events older than the retention period
+func (s *SQLiteAuditLogger) CleanupExpiredEvents(ctx context.Context) (int, error) {
+	cutoffTime := time.Now().UTC().AddDate(0, 0, -s.config.RetentionDays)
+	cutoffNano := cutoffTime.UnixNano()
+
+	// Delete expired events (but preserve tombstone events)
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM audit_events 
+		WHERE timestamp < ? AND action != ?
+	`, cutoffNano, ActionTombstone)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete expired events: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
+// CreateTombstone creates a tombstone event for subject erasure
+func (s *SQLiteAuditLogger) CreateTombstone(ctx context.Context, subject, reason string) error {
+	// First, ensure all pending events are flushed to maintain proper hash chain
+	s.bufferMutex.Lock()
+	err := s.flushBuffer()
+	s.bufferMutex.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to flush pending events before tombstone: %w", err)
+	}
+
+	correlationID := uuid.New().String()
+	tombstone := NewTombstoneEvent(correlationID, subject, reason)
+
+	// Log the tombstone event - this preserves the hash chain
+	if err := s.LogEvent(ctx, tombstone); err != nil {
+		return fmt.Errorf("failed to log tombstone event: %w", err)
+	}
+
+	// Wait for flush to ensure tombstone is persisted
+	s.bufferMutex.Lock()
+	err = s.flushBuffer()
+	s.bufferMutex.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to flush tombstone event: %w", err)
+	}
+
+	// Create a separate tombstone table to track erased subjects
+	// This preserves the original audit events and their hash chain
+	_, err = s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS audit_tombstones (
+			subject TEXT PRIMARY KEY,
+			tombstone_event_id TEXT NOT NULL,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			reason TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create tombstones table: %w", err)
+	}
+
+	// Record the subject as erased
+	_, err = s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO audit_tombstones (subject, tombstone_event_id, reason)
+		VALUES (?, ?, ?)
+	`, subject, tombstone.ID, reason)
+	if err != nil {
+		return fmt.Errorf("failed to record tombstone: %w", err)
+	}
+
+	return nil
+}
+
+// ExportToS3 exports audit events to S3 with optional KMS encryption
+func (s *SQLiteAuditLogger) ExportToS3(ctx context.Context, bucket, prefix string, kmsKeyID string) error {
+	if s.s3Client == nil {
+		return fmt.Errorf("S3 client not initialized")
+	}
+
+	// Generate export filename with timestamp
+	timestamp := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	key := fmt.Sprintf("%s/audit-export-%s.jsonl", strings.TrimSuffix(prefix, "/"), timestamp)
+
+	// Export to buffer first
+	var buffer bytes.Buffer
+	if err := s.Export(ctx, "jsonl", &buffer); err != nil {
+		return fmt.Errorf("failed to export to buffer: %w", err)
+	}
+
+	// Prepare S3 put object input
+	putInput := &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(buffer.Bytes()),
+		ContentType: aws.String("application/x-jsonlines"),
+		Metadata: map[string]string{
+			"export-timestamp": timestamp,
+			"source":           "mcp-airlock-audit",
+		},
+	}
+
+	// Add KMS encryption if specified
+	if kmsKeyID != "" {
+		putInput.ServerSideEncryption = types.ServerSideEncryptionAwsKms
+		putInput.SSEKMSKeyId = aws.String(kmsKeyID)
+	}
+
+	// Upload to S3
+	_, err := s.s3Client.PutObject(ctx, putInput)
+	if err != nil {
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	return nil
+}
+
+// loadTombstones loads all tombstoned subjects into a map
+func (s *SQLiteAuditLogger) loadTombstones(ctx context.Context) (map[string]bool, error) {
+	tombstones := make(map[string]bool)
+
+	rows, err := s.db.QueryContext(ctx, "SELECT subject FROM audit_tombstones")
+	if err != nil {
+		return tombstones, nil // Return empty map if table doesn't exist yet
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var subject string
+		if err := rows.Scan(&subject); err != nil {
+			continue // Skip invalid rows
+		}
+		tombstones[subject] = true
+	}
+
+	return tombstones, nil
+}
+
+// queryRaw retrieves audit events without applying tombstone redaction (for internal use)
+func (s *SQLiteAuditLogger) queryRaw(ctx context.Context, filter *QueryFilter) ([]*AuditEvent, error) {
+	query := "SELECT id, timestamp, correlation_id, tenant, subject, action, resource, decision, reason, metadata, hash, previous_hash, latency_ms, redaction_count FROM audit_events"
+	args := []interface{}{}
+	conditions := []string{}
+
+	// Build WHERE clause
+	if filter.StartTime != nil {
+		conditions = append(conditions, "timestamp >= ?")
+		args = append(args, filter.StartTime.UnixNano())
+	}
+	if filter.EndTime != nil {
+		conditions = append(conditions, "timestamp <= ?")
+		args = append(args, filter.EndTime.UnixNano())
+	}
+	if filter.Tenant != "" {
+		conditions = append(conditions, "tenant = ?")
+		args = append(args, filter.Tenant)
+	}
+	if filter.Subject != "" {
+		conditions = append(conditions, "subject = ?")
+		args = append(args, filter.Subject)
+	}
+	if filter.Action != "" {
+		conditions = append(conditions, "action = ?")
+		args = append(args, filter.Action)
+	}
+	if filter.Decision != "" {
+		conditions = append(conditions, "decision = ?")
+		args = append(args, filter.Decision)
+	}
+	if filter.CorrelationID != "" {
+		conditions = append(conditions, "correlation_id = ?")
+		args = append(args, filter.CorrelationID)
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Add ordering
+	orderBy := "timestamp"
+	if filter.OrderBy != "" {
+		orderBy = filter.OrderBy
+	}
+	query += " ORDER BY " + orderBy
+	if filter.OrderDesc {
+		query += " DESC"
+	}
+
+	// Add pagination
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+
+		if filter.Offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
+	}
+
+	// Execute query
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Parse results (without tombstone redaction)
+	var events []*AuditEvent
+	for rows.Next() {
+		event := &AuditEvent{}
+		var timestampNano int64
+		var metadataJSON string
+
+		err := rows.Scan(
+			&event.ID,
+			&timestampNano,
+			&event.CorrelationID,
+			&event.Tenant,
+			&event.Subject,
+			&event.Action,
+			&event.Resource,
+			&event.Decision,
+			&event.Reason,
+			&metadataJSON,
+			&event.Hash,
+			&event.PreviousHash,
+			&event.LatencyMs,
+			&event.RedactionCount,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		event.Timestamp = time.Unix(0, timestampNano)
+
+		// Parse metadata JSON
+		if metadataJSON != "" {
+			if err := json.Unmarshal([]byte(metadataJSON), &event.Metadata); err != nil {
+				// Log error but don't fail the query
+				event.Metadata = map[string]interface{}{"parse_error": err.Error()}
+			}
+		}
+
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return events, nil
+}
+
+// applyTombstoneRedactionWithMap checks if a subject has been tombstoned and redacts it using a pre-loaded map
+func (s *SQLiteAuditLogger) applyTombstoneRedactionWithMap(event *AuditEvent, tombstones map[string]bool) *AuditEvent {
+	if !tombstones[event.Subject] {
+		return event // Return original event if not tombstoned
+	}
+
+	// Create a copy of the event with redacted subject
+	redactedEvent := *event
+	redactedEvent.Subject = fmt.Sprintf("erased_%x", s.hasher.HashString(event.Subject))
+
+	// Add metadata indicating erasure
+	if redactedEvent.Metadata == nil {
+		redactedEvent.Metadata = make(map[string]interface{})
+	}
+	redactedEvent.Metadata["original_subject_erased"] = true
+
+	return &redactedEvent
 }
 
 // Close gracefully shuts down the audit logger

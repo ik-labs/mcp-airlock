@@ -132,7 +132,7 @@
   - Write integration tests for complete audit trail coverage
   - _Requirements: R3.1, R8.1, R8.2, R8.3_
 
-- [ ] 7.3 Add audit retention and tombstone-based erasure
+- [x] 7.3 Add audit retention and tombstone-based erasure
   - Implement configurable retention policies with automatic cleanup (default 30 days)
   - Add JSONL export format with optional S3 export and KMS encryption
   - Create subject erasure via tombstone events (preserves hash-chain integrity)

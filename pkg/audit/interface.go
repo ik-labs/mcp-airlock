@@ -6,6 +6,8 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // AuditLogger defines the interface for audit event logging with hash chaining
@@ -27,6 +29,15 @@ type AuditLogger interface {
 
 	// ValidateChain verifies the integrity of the hash chain
 	ValidateChain(ctx context.Context) error
+
+	// CleanupExpiredEvents removes events older than the retention period
+	CleanupExpiredEvents(ctx context.Context) (int, error)
+
+	// CreateTombstone creates a tombstone event for subject erasure
+	CreateTombstone(ctx context.Context, subject, reason string) error
+
+	// ExportToS3 exports audit events to S3 with optional KMS encryption
+	ExportToS3(ctx context.Context, bucket, prefix string, kmsKeyID string) error
 }
 
 // AuditEvent represents a single audit log entry with hash chaining
@@ -105,6 +116,15 @@ type AuditConfig struct {
 
 	// Security settings
 	EncryptionKey string `yaml:"encryption_key" json:"encryption_key"` // KMS key for S3 export
+
+	// S3 export settings
+	S3Bucket string `yaml:"s3_bucket" json:"s3_bucket"`   // S3 bucket for exports
+	S3Prefix string `yaml:"s3_prefix" json:"s3_prefix"`   // S3 key prefix
+	S3Region string `yaml:"s3_region" json:"s3_region"`   // AWS region
+	KMSKeyID string `yaml:"kms_key_id" json:"kms_key_id"` // KMS key for encryption
+
+	// Retention cleanup settings
+	CleanupInterval time.Duration `yaml:"cleanup_interval" json:"cleanup_interval"` // how often to run cleanup
 }
 
 // EventType constants for common audit event types
@@ -127,14 +147,21 @@ const (
 
 // Action constants for common audit actions
 const (
-	ActionLogin          = "login"
-	ActionLogout         = "logout"
-	ActionTokenValidate  = "token_validate"
-	ActionPolicyEvaluate = "policy_evaluate"
-	ActionResourceRead   = "resource_read"
-	ActionResourceWrite  = "resource_write"
-	ActionToolCall       = "tool_call"
-	ActionRedactData     = "redact_data"
-	ActionRateLimitHit   = "rate_limit_hit"
-	ActionPathTraversal  = "path_traversal_attempt"
+	ActionLogin            = "login"
+	ActionLogout           = "logout"
+	ActionTokenValidate    = "token_validate"
+	ActionPolicyEvaluate   = "policy_evaluate"
+	ActionResourceRead     = "resource_read"
+	ActionResourceWrite    = "resource_write"
+	ActionToolCall         = "tool_call"
+	ActionRedactData       = "redact_data"
+	ActionRateLimitHit     = "rate_limit_hit"
+	ActionPathTraversal    = "path_traversal_attempt"
+	ActionTombstone        = "tombstone"
+	ActionRetentionCleanup = "retention_cleanup"
 )
+
+// S3Client interface for S3 operations (allows mocking)
+type S3Client interface {
+	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+}

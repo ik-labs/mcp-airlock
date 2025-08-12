@@ -18,11 +18,12 @@ func NewAuditLogger(config *AuditConfig) (AuditLogger, error) {
 // DefaultConfig returns a default audit configuration for SQLite
 func DefaultConfig(databasePath string) *AuditConfig {
 	return &AuditConfig{
-		Backend:       "sqlite",
-		Database:      databasePath,
-		RetentionDays: 30,
-		ExportFormat:  "jsonl",
-		BatchSize:     100,
-		FlushTimeout:  5 * time.Second,
+		Backend:         "sqlite",
+		Database:        databasePath,
+		RetentionDays:   30,
+		ExportFormat:    "jsonl",
+		BatchSize:       100,
+		FlushTimeout:    5 * time.Second,
+		CleanupInterval: 24 * time.Hour,
 	}
 }

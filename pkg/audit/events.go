@@ -161,6 +161,28 @@ func NewRateLimitEvent(correlationID, tenant, subject string, metadata map[strin
 		Build()
 }
 
+// NewTombstoneEvent creates a tombstone event for subject erasure
+func NewTombstoneEvent(correlationID, subject, reason string) *AuditEvent {
+	return NewEvent(ActionTombstone).
+		WithCorrelationID(correlationID).
+		WithSubject(subject).
+		WithDecision(DecisionAllow).
+		WithReason(reason).
+		WithMetadata("erased_subject", subject).
+		Build()
+}
+
+// NewRetentionCleanupEvent creates a retention cleanup audit event
+func NewRetentionCleanupEvent(correlationID string, deletedCount int, cutoffTime time.Time) *AuditEvent {
+	return NewEvent(ActionRetentionCleanup).
+		WithCorrelationID(correlationID).
+		WithDecision(DecisionAllow).
+		WithReason("Automatic retention cleanup").
+		WithMetadata("deleted_count", deletedCount).
+		WithMetadata("cutoff_time", cutoffTime.Format(time.RFC3339)).
+		Build()
+}
+
 // ContextKey type for context values
 type ContextKey string
 

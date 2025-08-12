@@ -30,6 +30,18 @@ func (m *MockAuditLogger) Export(ctx context.Context, format string, writer io.W
 	return nil
 }
 
+func (m *MockAuditLogger) CleanupExpiredEvents(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
+func (m *MockAuditLogger) CreateTombstone(ctx context.Context, subject, reason string) error {
+	return nil
+}
+
+func (m *MockAuditLogger) ExportToS3(ctx context.Context, bucket, prefix string, kmsKeyID string) error {
+	return nil
+}
+
 func (m *MockAuditLogger) Close() error {
 	return nil
 }

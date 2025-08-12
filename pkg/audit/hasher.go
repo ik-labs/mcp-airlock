@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/zeebo/blake3"
 )
@@ -19,9 +18,8 @@ type Hasher struct {
 func NewHasher() *Hasher {
 	salt := make([]byte, 32)
 	if _, err := rand.Read(salt); err != nil {
-		// Fallback to deterministic salt if random fails
-		hashArray := blake3.Sum256([]byte(fmt.Sprintf("airlock-audit-%d", time.Now().UnixNano())))
-		salt = hashArray[:]
+		// Critical system issue - fail fast
+		panic(fmt.Sprintf("failed to generate random salt: %v", err))
 	}
 
 	return &Hasher{
@@ -140,4 +138,12 @@ func (h *Hasher) GetSalt() []byte {
 // GenesisHash returns the hash for the first event in a chain (empty previous hash)
 func (h *Hasher) GenesisHash() string {
 	return ""
+}
+
+// HashString computes a Blake3 hash of a string with the hasher's salt
+func (h *Hasher) HashString(input string) []byte {
+	hasher := blake3.New()
+	hasher.Write(h.salt)
+	hasher.Write([]byte(input))
+	return hasher.Sum(nil)
 }

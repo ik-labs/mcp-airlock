@@ -5,8 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"strings"
+
 	"go.uber.org/zap"
 )
+
+// contains is a small helper wrapper for substring checks in recommendations
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
 
 // TestUnusedPatternDetection tests that newly added patterns are not incorrectly flagged as unused
 func TestUnusedPatternDetection(t *testing.T) {
