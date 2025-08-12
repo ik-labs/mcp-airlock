@@ -402,12 +402,12 @@ func TestIsServerError(t *testing.T) {
 }
 
 func TestNewErrorContext(t *testing.T) {
-	// Create context with values
+	// Create context with values using exported context keys
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "correlation_id", "test-correlation")
-	ctx = context.WithValue(ctx, "tenant", "test-tenant")
-	ctx = context.WithValue(ctx, "subject", "test-subject")
-	ctx = context.WithValue(ctx, "tool", "test-tool")
+	ctx = context.WithValue(ctx, CorrelationIDKey, "test-correlation")
+	ctx = context.WithValue(ctx, TenantKey, "test-tenant")
+	ctx = context.WithValue(ctx, SubjectKey, "test-subject")
+	ctx = context.WithValue(ctx, ToolKey, "test-tool")
 
 	errorCtx := NewErrorContext(ctx)
 

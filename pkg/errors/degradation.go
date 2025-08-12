@@ -309,19 +309,21 @@ func (dm *DegradationManager) IsAuditBuffering() bool {
 }
 
 // updateDegradationMode updates the overall degradation mode
-func (dm *DegradationManager) updateDegradationMode(serviceName string, err error) {
+func (dm *DegradationManager) updateDegradationMode(serviceName string, _ error) {
 	switch serviceName {
 	case "audit":
-		if dm.mode == ModeNormal {
+		switch dm.mode {
+		case ModeNormal:
 			dm.mode = ModeAuditBuffering
-		} else if dm.mode == ModePolicyLKG {
+		case ModePolicyLKG:
 			dm.mode = ModeEmergency
 		}
 
 	case "policy":
-		if dm.mode == ModeNormal {
+		switch dm.mode {
+		case ModeNormal:
 			dm.mode = ModePolicyLKG
-		} else if dm.mode == ModeAuditBuffering {
+		case ModeAuditBuffering:
 			dm.mode = ModeEmergency
 		}
 

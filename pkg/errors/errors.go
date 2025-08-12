@@ -271,31 +271,45 @@ func NewErrorContext(ctx context.Context) *ErrorContext {
 	}
 }
 
+// ContextKey type to avoid collisions with built-in types
+type ContextKey string
+
+const (
+	// CorrelationIDKey is the context key for correlation IDs
+	CorrelationIDKey ContextKey = "correlation_id"
+	// TenantKey is the context key for tenant information
+	TenantKey ContextKey = "tenant"
+	// SubjectKey is the context key for subject information
+	SubjectKey ContextKey = "subject"
+	// ToolKey is the context key for tool information
+	ToolKey ContextKey = "tool"
+)
+
 // Helper functions to extract values from context
 // These should match the context functions in internal/server/context.go
 func getCorrelationID(ctx context.Context) string {
-	if id, ok := ctx.Value("correlation_id").(string); ok {
+	if id, ok := ctx.Value(CorrelationIDKey).(string); ok {
 		return id
 	}
 	return "unknown"
 }
 
 func getTenant(ctx context.Context) string {
-	if tenant, ok := ctx.Value("tenant").(string); ok {
+	if tenant, ok := ctx.Value(TenantKey).(string); ok {
 		return tenant
 	}
 	return "unknown"
 }
 
 func getSubject(ctx context.Context) string {
-	if subject, ok := ctx.Value("subject").(string); ok {
+	if subject, ok := ctx.Value(SubjectKey).(string); ok {
 		return subject
 	}
 	return "unknown"
 }
 
 func getTool(ctx context.Context) string {
-	if tool, ok := ctx.Value("tool").(string); ok {
+	if tool, ok := ctx.Value(ToolKey).(string); ok {
 		return tool
 	}
 	return "unknown"
