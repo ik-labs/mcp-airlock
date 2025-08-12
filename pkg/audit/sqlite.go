@@ -28,7 +28,7 @@ type SQLiteAuditLogger struct {
 
 	// Buffering for high-performance writes
 	eventBuffer []*AuditEvent
-	bufferMutex sync.Mutex
+	bufferMutex sync.RWMutex
 	flushTimer  *time.Timer
 
 	// Shutdown coordination

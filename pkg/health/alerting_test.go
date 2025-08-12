@@ -306,8 +306,10 @@ func TestHealthCheckAlerter_GetFailureCounts(t *testing.T) {
 }
 
 func TestGetCorrelationIDFromContext(t *testing.T) {
-	// Test with nil context
-	correlationID := getCorrelationIDFromContext(nil)
+	// Test with nil context - explicitly testing nil handling behavior
+	// nolint:staticcheck // Testing nil context handling is intentional
+	var nilCtx context.Context
+	correlationID := getCorrelationIDFromContext(nilCtx)
 	if correlationID != "" {
 		t.Errorf("Expected empty correlation ID with nil context, got %s", correlationID)
 	}
@@ -319,15 +321,15 @@ func TestGetCorrelationIDFromContext(t *testing.T) {
 		t.Errorf("Expected empty correlation ID without correlation_id in context, got %s", correlationID)
 	}
 
-	// Test with context with correlation ID
-	ctx = context.WithValue(context.Background(), "correlation_id", "test-correlation-123")
+	// Test with context with correlation ID using proper context key
+	ctx = context.WithValue(context.Background(), correlationIDKey, "test-correlation-123")
 	correlationID = getCorrelationIDFromContext(ctx)
 	if correlationID != "test-correlation-123" {
 		t.Errorf("Expected correlation ID 'test-correlation-123', got %s", correlationID)
 	}
 
 	// Test with context with non-string correlation ID
-	ctx = context.WithValue(context.Background(), "correlation_id", 123)
+	ctx = context.WithValue(context.Background(), correlationIDKey, 123)
 	correlationID = getCorrelationIDFromContext(ctx)
 	if correlationID != "" {
 		t.Errorf("Expected empty correlation ID with non-string value, got %s", correlationID)

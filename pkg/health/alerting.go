@@ -101,13 +101,18 @@ func (lah *LogAlertHandler) cleanupOldAlerts() {
 	}
 }
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const correlationIDKey contextKey = "correlation_id"
+
 // getCorrelationIDFromContext extracts correlation ID from context
 func getCorrelationIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
 
-	if correlationID, ok := ctx.Value("correlation_id").(string); ok {
+	if correlationID, ok := ctx.Value(correlationIDKey).(string); ok {
 		return correlationID
 	}
 

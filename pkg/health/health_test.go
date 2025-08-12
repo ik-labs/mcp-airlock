@@ -259,6 +259,9 @@ func TestJWKSHealthChecker(t *testing.T) {
 	if status != "unhealthy" {
 		t.Errorf("Expected status 'unhealthy' with nil authenticator, got %s", status)
 	}
+	if message != "Authenticator not initialized" {
+		t.Errorf("Expected message 'Authenticator not initialized', got %s", message)
+	}
 }
 
 func TestPolicyHealthChecker(t *testing.T) {
@@ -284,6 +287,9 @@ func TestPolicyHealthChecker(t *testing.T) {
 
 	if status != "unhealthy" {
 		t.Errorf("Expected status 'unhealthy' with nil policy engine, got %s", status)
+	}
+	if message != "Policy engine not initialized" {
+		t.Errorf("Expected message 'Policy engine not initialized', got %s", message)
 	}
 }
 
@@ -347,6 +353,9 @@ func TestUpstreamHealthChecker(t *testing.T) {
 
 	if status != "unhealthy" {
 		t.Errorf("Expected status 'unhealthy' with nil upstream connector, got %s", status)
+	}
+	if message != "Upstream connector not initialized" {
+		t.Errorf("Expected message 'Upstream connector not initialized', got %s", message)
 	}
 }
 

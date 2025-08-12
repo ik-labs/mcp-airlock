@@ -42,16 +42,20 @@ func Example() {
 		return health.StatusHealthy, "Policy compiled successfully"
 	})
 
-	// Audit store health check with critical alerting
+	// Audit store health check with critical alerting and event buffering
 	healthChecker.RegisterCheck("audit", func(ctx context.Context) (health.Status, string) {
 		// Simulate audit store connectivity
 		status := health.StatusHealthy
 		message := "Audit store operational"
 
-		// If audit store fails, send critical alert
+		// If audit store fails, send critical alert and show buffering
 		if status == health.StatusUnhealthy {
 			alertHandler.SendAlert(context.Background(), health.AlertLevelCritical, "audit_store",
 				"Audit store failure detected - events being buffered")
+
+			// Show how events would be buffered during failures
+			bufferedCount := eventBuffer.GetBufferedEventCount()
+			message = fmt.Sprintf("Audit store failed (%d events buffered)", bufferedCount)
 		}
 
 		return status, message
