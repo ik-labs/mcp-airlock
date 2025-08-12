@@ -140,7 +140,7 @@
   - _Requirements: R15.1, R15.3, R8.4_
 
 - [ ] 8. Error handling and resilience patterns
-- [ ] 8.1 Implement deterministic error handling with HTTP-to-MCP mapping
+- [x] 8.1 Implement deterministic error handling with HTTP-to-MCP mapping
   - Create error mapping table (401→InvalidRequest, 403→Forbidden, 413→RequestTooLarge, etc.)
   - Add basic retry/backoff for upstream failures (circuit breaker in v1.1)
   - Implement graceful degradation when audit store fails (buffer events)
