@@ -99,13 +99,11 @@ func (h *Hasher) ValidateEventHash(event *AuditEvent) error {
 }
 
 // ValidateChain verifies the integrity of a sequence of audit events
+// Events MUST be pre-sorted by timestamp in ascending order by the caller
 func (h *Hasher) ValidateChain(events []*AuditEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
-
-	// Sort events by timestamp to ensure proper chain order
-	// Note: In production, events should already be ordered by the database query
 
 	var previousHash string
 	for i, event := range events {

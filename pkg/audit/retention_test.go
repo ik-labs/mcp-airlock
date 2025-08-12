@@ -501,7 +501,7 @@ func TestSQLiteAuditLogger_ExportWithTombstones(t *testing.T) {
 	// Verify redacted subject appears in export
 	var hasRedactedSubject bool
 	for _, line := range lines {
-		if strings.Contains(line, `"erased_`) {
+		if strings.Contains(line, `"subject":"erased_`) {
 			hasRedactedSubject = true
 			break
 		}

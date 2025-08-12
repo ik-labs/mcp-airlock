@@ -2,9 +2,6 @@ package audit
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -146,14 +143,4 @@ func (sal *SecurityAuditLogger) LogSystemEvent(ctx context.Context, correlationI
 		Build()
 
 	return sal.auditLogger.LogEvent(ctx, event)
-}
-
-// generateEventID generates a unique event ID
-func generateEventID() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to timestamp-based ID
-		return fmt.Sprintf("evt_%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(bytes)
 }

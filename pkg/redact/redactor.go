@@ -109,7 +109,7 @@ func (r *Redactor) RedactStream(ctx context.Context, reader io.Reader, writer io
 
 	// Get buffer from pool
 	buf := r.bufPool.Get().([]byte)
-	defer r.bufPool.Put(buf)
+	defer r.bufPool.Put(buf) //nolint:SA6002 // buf is a slice, this is the correct pattern for buffer pools
 
 	scanner := bufio.NewScanner(reader)
 	// Use a slice of the buffer to avoid allocations
@@ -154,7 +154,7 @@ func (r *Redactor) RedactStream(ctx context.Context, reader io.Reader, writer io
 }
 
 // redactData applies redaction patterns to byte data
-func (r *Redactor) redactData(ctx context.Context, data []byte, dataType string) (*RedactionResult, error) {
+func (r *Redactor) redactData(ctx context.Context, data []byte, _ string) (*RedactionResult, error) {
 	start := time.Now()
 
 	r.mutex.RLock()

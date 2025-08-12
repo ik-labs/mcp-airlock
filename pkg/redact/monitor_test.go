@@ -2,6 +2,7 @@ package redact
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,10 +340,10 @@ func TestRecommendations(t *testing.T) {
 	foundProcessingTimeRec := false
 
 	for _, rec := range report.Recommendations {
-		if contains(rec, "False positive rate") {
+		if strings.Contains(rec, "False positive rate") {
 			foundFalsePositiveRec = true
 		}
-		if contains(rec, "processing time") {
+		if strings.Contains(rec, "processing time") {
 			foundProcessingTimeRec = true
 		}
 	}
@@ -509,26 +510,7 @@ func TestValidationPatternCompilationError(t *testing.T) {
 		t.Error("Expected error for invalid regex pattern")
 	}
 
-	if !contains(err.Error(), "failed to compile false positive regex") {
+	if !strings.Contains(err.Error(), "failed to compile false positive regex") {
 		t.Errorf("Expected compilation error, got: %v", err)
 	}
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			(len(s) > len(substr) &&
-				(s[:len(substr)] == substr ||
-					s[len(s)-len(substr):] == substr ||
-					containsSubstring(s, substr))))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

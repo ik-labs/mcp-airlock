@@ -4,6 +4,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -29,6 +30,9 @@ type AuditLogger interface {
 
 	// ValidateChain verifies the integrity of the hash chain
 	ValidateChain(ctx context.Context) error
+
+	// Flush ensures all pending events are written and returns any error
+	Flush() error
 
 	// CleanupExpiredEvents removes events older than the retention period
 	CleanupExpiredEvents(ctx context.Context) (int, error)
@@ -69,6 +73,46 @@ type AuditEvent struct {
 
 	// Redaction counts (no sensitive data)
 	RedactionCount int `json:"redaction_count,omitempty" db:"redaction_count"`
+}
+
+// Validate checks if the audit event has valid required fields
+func (e *AuditEvent) Validate() error {
+	if e.ID == "" {
+		return fmt.Errorf("audit event ID is required")
+	}
+	if e.Action == "" {
+		return fmt.Errorf("audit event Action is required")
+	}
+	if e.Subject == "" {
+		return fmt.Errorf("audit event Subject is required")
+	}
+	if e.CorrelationID == "" {
+		return fmt.Errorf("audit event CorrelationID is required")
+	}
+	if e.Timestamp.IsZero() {
+		return fmt.Errorf("audit event Timestamp is required")
+	}
+
+	// Validate Decision if set
+	if e.Decision != "" {
+		switch e.Decision {
+		case DecisionAllow, DecisionDeny, DecisionError:
+			// Valid decision
+		default:
+			return fmt.Errorf("invalid Decision value: %s (must be one of: %s, %s, %s)",
+				e.Decision, DecisionAllow, DecisionDeny, DecisionError)
+		}
+	}
+
+	// Validate non-negative numeric fields
+	if e.LatencyMs < 0 {
+		return fmt.Errorf("LatencyMs must be non-negative, got: %d", e.LatencyMs)
+	}
+	if e.RedactionCount < 0 {
+		return fmt.Errorf("RedactionCount must be non-negative, got: %d", e.RedactionCount)
+	}
+
+	return nil
 }
 
 // QueryFilter defines criteria for querying audit events
@@ -125,6 +169,49 @@ type AuditConfig struct {
 
 	// Retention cleanup settings
 	CleanupInterval time.Duration `yaml:"cleanup_interval" json:"cleanup_interval"` // how often to run cleanup
+}
+
+// Validate checks if the audit configuration has valid required fields and values
+func (c *AuditConfig) Validate() error {
+	if c.Backend == "" {
+		return fmt.Errorf("Backend is required")
+	}
+	if c.Database == "" {
+		return fmt.Errorf("atabase path/connection string is required")
+	}
+	if c.RetentionDays < 0 {
+		return fmt.Errorf("RetentionDays must be non-negative, got: %d", c.RetentionDays)
+	}
+	if c.BatchSize <= 0 {
+		return fmt.Errorf("BatchSize must be positive, got: %d", c.BatchSize)
+	}
+	if c.FlushTimeout < 0 {
+		return fmt.Errorf("FlushTimeout must be non-negative, got: %v", c.FlushTimeout)
+	}
+	if c.CleanupInterval < 0 {
+		return fmt.Errorf("CleanupInterval must be non-negative, got: %v", c.CleanupInterval)
+	}
+
+	// Validate export format if specified
+	if c.ExportFormat != "" {
+		switch c.ExportFormat {
+		case "jsonl", "csv":
+			// Valid formats
+		default:
+			return fmt.Errorf("unsupported ExportFormat: %s (supported: jsonl, csv)", c.ExportFormat)
+		}
+	}
+
+	// Backend-specific validation
+	switch c.Backend {
+	case "sqlite":
+		// SQLite-specific validation could go here
+		// For now, Database field validation is sufficient
+	default:
+		return fmt.Errorf("unsupported Backend: %s", c.Backend)
+	}
+
+	return nil
 }
 
 // EventType constants for common audit event types

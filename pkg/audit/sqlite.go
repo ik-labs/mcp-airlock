@@ -519,6 +519,13 @@ func (s *SQLiteAuditLogger) ValidateChain(ctx context.Context) error {
 	return s.hasher.ValidateChain(events)
 }
 
+// Flush ensures all pending events are written to the database
+func (s *SQLiteAuditLogger) Flush() error {
+	s.bufferMutex.Lock()
+	defer s.bufferMutex.Unlock()
+	return s.flushBuffer()
+}
+
 // flushRoutine runs in the background to periodically flush buffered events
 func (s *SQLiteAuditLogger) flushRoutine() {
 	defer s.wg.Done()
@@ -620,17 +627,7 @@ func (s *SQLiteAuditLogger) CreateTombstone(ctx context.Context, subject, reason
 
 	// Create a separate tombstone table to track erased subjects
 	// This preserves the original audit events and their hash chain
-	_, err = s.db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS audit_tombstones (
-			subject TEXT PRIMARY KEY,
-			tombstone_event_id TEXT NOT NULL,
-			created_at INTEGER DEFAULT (strftime('%s', 'now')),
-			reason TEXT NOT NULL
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create tombstones table: %w", err)
-	}
+	// Record the subject as erased
 
 	// Record the subject as erased
 	_, err = s.db.ExecContext(ctx, `

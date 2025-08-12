@@ -115,7 +115,7 @@ func (rm *RedactionMonitor) RecordRedactionEvent(ctx context.Context, result *Re
 }
 
 // validateRedactionEffectiveness checks for false positives and negatives
-func (rm *RedactionMonitor) validateRedactionEffectiveness(originalData, redactedData []byte, patternsHit map[string]int) {
+func (rm *RedactionMonitor) validateRedactionEffectiveness(_, redactedData []byte, _ map[string]int) {
 	for patternName, validationPattern := range rm.validationPatterns {
 		stats := rm.patternEffectiveness[patternName]
 		if stats == nil {

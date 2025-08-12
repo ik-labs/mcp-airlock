@@ -7,6 +7,15 @@ import (
 
 // NewAuditLogger creates a new audit logger based on the configuration
 func NewAuditLogger(config *AuditConfig) (AuditLogger, error) {
+	if config == nil {
+		return nil, fmt.Errorf("audit config cannot be nil")
+	}
+
+	// Validate configuration before proceeding
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid audit config: %w", err)
+	}
+
 	switch config.Backend {
 	case "sqlite":
 		return NewSQLiteAuditLogger(config)

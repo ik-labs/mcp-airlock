@@ -54,6 +54,10 @@ func (m *MockAuditLogger) ValidateChain(ctx context.Context) error {
 	return nil
 }
 
+func (m *MockAuditLogger) Flush() error {
+	return nil
+}
+
 func (m *MockAuditLogger) GetEvents() []*AuditEvent {
 	return m.events
 }

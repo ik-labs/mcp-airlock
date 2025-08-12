@@ -37,8 +37,10 @@ func TestSQLiteAuditLogger_LogEvent(t *testing.T) {
 		t.Fatalf("Failed to log event: %v", err)
 	}
 
-	// Wait for flush
-	time.Sleep(200 * time.Millisecond)
+	// Flush to ensure event is persisted
+	if err := logger.Flush(); err != nil {
+		t.Fatalf("Failed to flush logger: %v", err)
+	}
 
 	// Query the event
 	events, err := logger.Query(ctx, &QueryFilter{
@@ -185,7 +187,11 @@ func TestSQLiteAuditLogger_Query(t *testing.T) {
 		if err := logger.LogEvent(ctx, event); err != nil {
 			t.Fatalf("Failed to log event: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Flush to ensure all events are persisted
+	if err := logger.Flush(); err != nil {
+		t.Fatalf("Failed to flush logger: %v", err)
 	}
 
 	// Test tenant filtering
@@ -278,7 +284,11 @@ func TestSQLiteAuditLogger_Export(t *testing.T) {
 		if err := logger.LogEvent(ctx, event); err != nil {
 			t.Fatalf("Failed to log event: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Flush to ensure all events are persisted
+	if err := logger.Flush(); err != nil {
+		t.Fatalf("Failed to flush logger: %v", err)
 	}
 
 	// Export to string builder
@@ -357,8 +367,10 @@ func TestSQLiteAuditLogger_ConcurrentWrites(t *testing.T) {
 		}
 	}
 
-	// Wait for final flush
-	time.Sleep(200 * time.Millisecond)
+	// Flush to ensure all events are persisted
+	if err := logger.Flush(); err != nil {
+		t.Fatalf("Failed to flush logger: %v", err)
+	}
 
 	// Verify all events were written
 	allEvents, err := logger.Query(ctx, &QueryFilter{})
@@ -409,7 +421,9 @@ func TestSQLiteAuditLogger_DatabaseRecovery(t *testing.T) {
 		t.Fatalf("Failed to log event: %v", err)
 	}
 
-	time.Sleep(20 * time.Millisecond)
+	if err := logger1.Flush(); err != nil {
+		t.Fatalf("Failed to flush first logger: %v", err)
+	}
 	logger1.Close()
 
 	// Create second logger with same database
@@ -427,7 +441,9 @@ func TestSQLiteAuditLogger_DatabaseRecovery(t *testing.T) {
 		t.Fatalf("Failed to log second event: %v", err)
 	}
 
-	time.Sleep(20 * time.Millisecond)
+	if err := logger2.Flush(); err != nil {
+		t.Fatalf("Failed to flush second logger: %v", err)
+	}
 
 	// Verify both events exist and chain is valid
 	allEvents, err := logger2.Query(ctx, &QueryFilter{
