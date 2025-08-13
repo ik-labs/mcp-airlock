@@ -1,0 +1,86 @@
+# MCP Airlock Configuration Template for Kubernetes Deployment
+# This template uses secret placeholders that will be replaced with actual values
+# from mounted secrets or environment variables
+
+server:
+  addr: ":8080"
+  public_base_url: "${PUBLIC_BASE_URL}"
+  tls:
+    cert_file: "${TLS_CERT_FILE}"
+    key_file: "${TLS_KEY_FILE}"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+auth:
+  oidc_issuer: "${OIDC_ISSUER_URL}"
+  audience: "${OIDC_AUDIENCE}"
+  jwks_cache_ttl: "5m"
+  clock_skew: "2m"
+  required_groups: ["${REQUIRED_GROUP}"]
+
+policy:
+  rego_file: "/etc/airlock/policy.rego"
+  cache_ttl: "1m"
+  reload_signal: "SIGHUP"
+
+roots:
+  - name: "repo-readonly"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/var/airlock/mounts/repo"
+    read_only: true
+  - name: "artifacts"
+    type: "s3"
+    virtual: "mcp://artifacts/"
+    real: "${S3_BUCKET_URL}"
+    read_only: false
+
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+    - name: "bearer_token"
+      regex: '(?i)bearer\s+[a-z0-9._-]+'
+      replace: "[redacted-token]"
+    - name: "api_key"
+      regex: '(?i)(api[_-]?key|token)["\s]*[:=]["\s]*[a-z0-9._-]+'
+      replace: "[redacted-api-key]"
+
+rate_limiting:
+  per_token: "200/min"
+  per_ip: "1000/min"
+  burst: 50
+
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/run/mcp/docs.sock"
+    timeout: "30s"
+    allow_tools: ["search_docs", "read_file"]
+  - name: "code-server"
+    type: "stdio"
+    command: ["python", "-m", "mcp_server.code"]
+    env:
+      PYTHONPATH: "/opt/mcp-servers"
+      API_KEY: "${CODE_SERVER_API_KEY}"
+    timeout: "30s"
+
+audit:
+  backend: "postgresql"
+  database: "${DATABASE_URL}"
+  retention: "720h"  # 30 days
+  export_format: "jsonl"
+
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: true
+    endpoint: "${JAEGER_ENDPOINT}"
+  logging:
+    level: "${LOG_LEVEL}"
+    format: "json"

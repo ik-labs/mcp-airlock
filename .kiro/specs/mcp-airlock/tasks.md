@@ -161,22 +161,22 @@
   - Write tests for health check scenarios and alerting behavior
   - _Requirements: R5.2, R13.1, R13.3_
 
-- [ ] 9. Configuration management and hot-reload
-- [ ] 9.1 Create comprehensive configuration system
+- [x] 9. Configuration management and hot-reload
+- [x] 9.1 Create comprehensive configuration system
   - Implement YAML configuration with schema validation at boot
   - Add environment variable and secret mount support for sensitive data
   - Create configuration validation with clear error messages and line numbers
   - Write unit tests for configuration loading, validation, and error handling
   - _Requirements: R7.1, R7.4, R12.1_
 
-- [ ] 9.2 Add hot-reload capabilities for policies and configuration
+- [x] 9.2 Add hot-reload capabilities for policies and configuration
   - Implement SIGHUP handler for policy and configuration reload
   - Add transactional configuration updates with rollback on failure
   - Create admin endpoint for configuration reload with proper authorization
   - Write integration tests for hot-reload scenarios and failure handling
   - _Requirements: R2.5, R12.3, R7.3_
 
-- [ ] 9.3 Add secrets management and key rotation support
+- [x] 9.3 Add secrets management and key rotation support
   - Implement secure secret handling via environment variables and secret mounts
   - Add JWKS key rotation handling with tested rollover procedures
   - Create configuration templates and examples for common deployment scenarios

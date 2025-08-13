@@ -1,0 +1,114 @@
+# MCP Airlock Configuration Template for Production Deployment
+# This template includes all security and monitoring features
+
+server:
+  addr: ":8080"
+  public_base_url: "${PUBLIC_BASE_URL}"
+  tls:
+    cert_file: "${TLS_CERT_FILE}"
+    key_file: "${TLS_KEY_FILE}"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+    connect: "5s"
+    upstream: "60s"
+
+auth:
+  oidc_issuer: "${OIDC_ISSUER_URL}"
+  audience: "${OIDC_AUDIENCE}"
+  jwks_cache_ttl: "5m"
+  clock_skew: "1m"  # Stricter for production
+  required_groups: ["${REQUIRED_GROUP}"]
+
+policy:
+  rego_file: "/etc/airlock/policy.rego"
+  cache_ttl: "5m"
+  reload_signal: "SIGHUP"
+
+roots:
+  - name: "secure-repo"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/var/airlock/secure/repo"
+    read_only: true
+  - name: "artifacts-s3"
+    type: "s3"
+    virtual: "mcp://artifacts/"
+    real: "${S3_BUCKET_URL}"
+    read_only: false
+  - name: "logs-archive"
+    type: "s3"
+    virtual: "mcp://logs/"
+    real: "${LOGS_S3_BUCKET_URL}"
+    read_only: true
+
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+    - name: "phone"
+      regex: '(?i)(\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}'
+      replace: "[redacted-phone]"
+    - name: "ssn"
+      regex: '(?i)\b\d{3}-?\d{2}-?\d{4}\b'
+      replace: "[redacted-ssn]"
+    - name: "credit_card"
+      regex: '(?i)\b(?:\d{4}[-\s]?){3}\d{4}\b'
+      replace: "[redacted-cc]"
+    - name: "bearer_token"
+      regex: '(?i)bearer\s+[a-z0-9._-]+'
+      replace: "[redacted-token]"
+    - name: "api_key"
+      regex: '(?i)(api[_-]?key|token|secret)["\s]*[:=]["\s]*[a-z0-9._-]+'
+      replace: "[redacted-api-key]"
+    - name: "aws_key"
+      regex: '(?i)(AKIA[0-9A-Z]{16})'
+      replace: "[redacted-aws-key]"
+    - name: "private_key"
+      regex: '-----BEGIN [A-Z ]+PRIVATE KEY-----'
+      replace: "[redacted-private-key]"
+
+rate_limiting:
+  per_token: "100/min"  # Conservative for production
+  per_ip: "500/min"
+  burst: 20
+
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/run/mcp/docs.sock"
+    timeout: "30s"
+    connect_timeout: "5s"
+    allow_tools: ["search_docs", "read_file"]
+  - name: "code-analysis"
+    type: "http"
+    url: "${CODE_ANALYSIS_URL}"
+    timeout: "60s"
+    connect_timeout: "10s"
+    allow_tools: ["analyze_code", "get_metrics"]
+  - name: "secure-storage"
+    type: "stdio"
+    command: ["${SECURE_STORAGE_CMD}"]
+    env:
+      STORAGE_KEY: "${STORAGE_ENCRYPTION_KEY}"
+      STORAGE_ENDPOINT: "${STORAGE_ENDPOINT}"
+    timeout: "45s"
+
+audit:
+  backend: "postgresql"
+  database: "${DATABASE_URL}"
+  retention: "2160h"  # 90 days
+  export_format: "jsonl"
+
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: true
+    endpoint: "${JAEGER_ENDPOINT}"
+  logging:
+    level: "${LOG_LEVEL:-info}"
+    format: "json"

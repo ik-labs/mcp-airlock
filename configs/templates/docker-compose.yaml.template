@@ -1,0 +1,79 @@
+# MCP Airlock Configuration Template for Docker Compose Deployment
+# This template is designed for local development and testing
+
+server:
+  addr: ":8080"
+  public_base_url: "${PUBLIC_BASE_URL:-http://localhost:8080}"
+  tls:
+    cert_file: "${TLS_CERT_FILE}"
+    key_file: "${TLS_KEY_FILE}"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+auth:
+  oidc_issuer: "${OIDC_ISSUER_URL}"
+  audience: "${OIDC_AUDIENCE:-mcp-airlock-dev}"
+  jwks_cache_ttl: "5m"
+  clock_skew: "2m"
+  required_groups: ["${REQUIRED_GROUP:-developers}"]
+
+policy:
+  rego_file: "/app/configs/policy.rego"
+  cache_ttl: "30s"  # Shorter for development
+  reload_signal: "SIGHUP"
+
+roots:
+  - name: "local-repo"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/workspace"
+    read_only: false  # Allow writes in development
+  - name: "temp-storage"
+    type: "fs"
+    virtual: "mcp://temp/"
+    real: "/tmp/airlock"
+    read_only: false
+
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+    - name: "bearer_token"
+      regex: '(?i)bearer\s+[a-z0-9._-]+'
+      replace: "[redacted-token]"
+
+rate_limiting:
+  per_token: "1000/min"  # More permissive for development
+  per_ip: "5000/min"
+  burst: 100
+
+upstreams:
+  - name: "local-docs"
+    type: "stdio"
+    command: ["python", "-m", "http.server", "8000"]
+    timeout: "30s"
+    allow_tools: ["read_file", "list_files"]
+  - name: "dev-tools"
+    type: "http"
+    url: "${DEV_TOOLS_URL:-http://localhost:3000}"
+    timeout: "30s"
+
+audit:
+  backend: "sqlite"
+  database: "/app/data/audit.db"
+  retention: "168h"  # 7 days for development
+  export_format: "jsonl"
+
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: false  # Disabled for development
+    endpoint: ""
+  logging:
+    level: "${LOG_LEVEL:-debug}"
+    format: "text"  # More readable for development
