@@ -1,0 +1,207 @@
+# Staging environment values for Airlock
+# Override default values for staging deployment
+
+# Replica count for staging
+replicaCount: 2
+
+# Image configuration
+image:
+  pullPolicy: Always
+
+# Ingress configuration for staging
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/staging-cert-id
+    alb.ingress.kubernetes.io/healthcheck-path: /live
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+  hosts:
+    - host: airlock-staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: airlock-staging-tls
+      hosts:
+        - airlock-staging.example.com
+
+# Resource configuration for staging
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Enable autoscaling in staging
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Persistence configuration for staging
+persistence:
+  enabled: true
+  storageClass: "gp3"
+  size: 20Gi
+
+# Staging-specific configuration
+config:
+  server:
+    addr: ":8080"
+    public_base_url: "https://airlock-staging.example.com"
+    timeouts:
+      read: "30s"
+      write: "30s"
+      idle: "120s"
+
+  # Staging OIDC configuration
+  auth:
+    oidc_issuer: "https://auth-staging.example.com/.well-known/openid-configuration"
+    audience: "mcp-airlock-staging"
+    jwks_cache_ttl: "5m"
+    clock_skew: "2m"
+    required_groups: ["mcp.staging.users"]
+
+  # Policy configuration
+  policy:
+    rego_file: "/etc/airlock/policy.rego"
+    cache_ttl: "1m"
+    reload_signal: "SIGHUP"
+
+  # Root virtualization for staging
+  roots:
+    - name: "repo-readonly"
+      type: "fs"
+      virtual: "mcp://repo/"
+      real: "/var/airlock/mounts/repo"
+      read_only: true
+    - name: "staging-artifacts"
+      type: "s3"
+      virtual: "mcp://artifacts/"
+      real: "s3://airlock-staging-artifacts/"
+      read_only: false
+
+  # DLP configuration
+  dlp:
+    patterns:
+      - name: "email"
+        regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+        replace: "[redacted-email]"
+      - name: "bearer_token"
+        regex: '(?i)bearer\s+[a-z0-9._-]+'
+        replace: "[redacted-token]"
+      - name: "staging_secrets"
+        regex: '(?i)staging[_-]?secret[_-]?[a-z0-9]+'
+        replace: "[redacted-staging-secret]"
+
+  # Rate limiting for staging
+  rate_limiting:
+    per_token: "500/min"  # Higher limits for staging
+    per_ip: "2000/min"
+    burst: 100
+
+  # Upstream servers for staging
+  upstreams:
+    - name: "docs-server-staging"
+      type: "unix"
+      socket: "/run/mcp/docs.sock"
+      timeout: "30s"
+      allow_tools: ["search_docs", "read_file", "list_directory"]
+    - name: "analytics-server-staging"
+      type: "stdio"
+      command: ["python", "-m", "mcp_server.analytics"]
+      env:
+        PYTHONPATH: "/opt/mcp-servers"
+        ENVIRONMENT: "staging"
+      timeout: "30s"
+
+  # Audit configuration for staging
+  audit:
+    backend: "sqlite"
+    database: "/var/lib/airlock/audit.db"
+    retention: "7d"  # Shorter retention for staging
+    export_format: "jsonl"
+
+  # Observability for staging
+  observability:
+    metrics:
+      enabled: true
+      path: "/metrics"
+    tracing:
+      enabled: true
+      endpoint: "http://jaeger-staging:14268/api/traces"
+    logging:
+      level: "debug"  # More verbose logging in staging
+      format: "json"
+
+# Enable monitoring in staging
+podMonitor:
+  enabled: true
+  namespace: "monitoring"
+  interval: 15s
+  scrapeTimeout: 10s
+  labels:
+    environment: staging
+
+# Network policy for staging
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: airlock-staging
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443  # HTTPS for OIDC and external services
+        - protocol: TCP
+          port: 53   # DNS
+        - protocol: UDP
+          port: 53   # DNS
+
+# Pod annotations for staging
+podAnnotations:
+  environment: "staging"
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Extra environment variables for staging
+extraEnvVars:
+  - name: ENVIRONMENT
+    value: "staging"
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: OTEL_RESOURCE_ATTRIBUTES
+    value: "service.name=airlock,service.version=staging,environment=staging"

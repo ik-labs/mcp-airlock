@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+*_test.go
+test-*
+tests/
+test-results/
+
+# Build artifacts
+airlock
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Kubernetes and Helm (will be in separate directories)
+k8s/
+helm/
+charts/
+deployments/
+
+# Scripts
+scripts/
+
+# Local configuration
+*.local.yaml
+*.local.yml
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Coverage reports
+coverage.out
+coverage.html
+
+# Vendor (if using)
+vendor/

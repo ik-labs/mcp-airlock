@@ -1,0 +1,189 @@
+# AWS Single-VPC Deployment Example
+# This example shows how to deploy Airlock in a single AWS VPC with ALB ingress
+
+# Namespace for the deployment
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airlock-production
+  labels:
+    name: airlock-production
+    environment: production
+---
+# AWS Load Balancer Controller ServiceAccount (if not already exists)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-load-balancer-controller
+  namespace: kube-system
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/AmazonEKSLoadBalancerControllerRole
+---
+# Airlock deployment with AWS-specific configuration
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airlock-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ik-labs/mcp-airlock
+    targetRevision: main
+    path: helm/airlock
+    helm:
+      valueFiles:
+        - values-production.yaml
+      values: |
+        # AWS-specific overrides
+        ingress:
+          enabled: true
+          className: "alb"
+          annotations:
+            kubernetes.io/ingress.class: alb
+            alb.ingress.kubernetes.io/scheme: internet-facing
+            alb.ingress.kubernetes.io/target-type: ip
+            alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+            alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/your-cert-id
+            alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
+            alb.ingress.kubernetes.io/healthcheck-path: /live
+            alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+            alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+            alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+            alb.ingress.kubernetes.io/group.name: airlock-production
+            alb.ingress.kubernetes.io/group.order: '100'
+          hosts:
+            - host: airlock.yourdomain.com
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        # AWS EBS storage
+        persistence:
+          enabled: true
+          storageClass: "gp3"
+          size: 100Gi
+          annotations:
+            volume.beta.kubernetes.io/storage-class: "gp3"
+
+        # Production resource configuration
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+
+        # Autoscaling configuration
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 20
+          targetCPUUtilizationPercentage: 60
+          targetMemoryUtilizationPercentage: 70
+
+        # Node affinity for production nodes
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node.kubernetes.io/instance-type
+                      operator: In
+                      values:
+                        - m5.large
+                        - m5.xlarge
+                        - m5.2xlarge
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - airlock
+                topologyKey: kubernetes.io/hostname
+
+        # AWS-specific configuration
+        config:
+          server:
+            public_base_url: "https://airlock.yourdomain.com"
+          
+          # Root virtualization with EFS and S3
+          roots:
+            - name: "repo-readonly"
+              type: "fs"
+              virtual: "mcp://repo/"
+              real: "/mnt/efs/repositories"
+              read_only: true
+            - name: "artifacts"
+              type: "s3"
+              virtual: "mcp://artifacts/"
+              real: "s3://your-airlock-artifacts-bucket/"
+              read_only: false
+
+        # Extra volumes for EFS
+        extraVolumes:
+          - name: efs-repo
+            persistentVolumeClaim:
+              claimName: efs-repo-pvc
+
+        extraVolumeMounts:
+          - name: efs-repo
+            mountPath: /mnt/efs/repositories
+            readOnly: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: airlock-production
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# EFS PersistentVolume for shared repository access
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: efs-repo-pv
+spec:
+  capacity:
+    storage: 1000Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: fs-0123456789abcdef0  # Replace with your EFS ID
+    volumeAttributes:
+      path: /repositories
+---
+# EFS PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: efs-repo-pvc
+  namespace: airlock-production
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 1000Gi
+---
+# EFS StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-0123456789abcdef0  # Replace with your EFS ID
+  directoryPerms: "0755"

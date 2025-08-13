@@ -1,0 +1,236 @@
+# Production environment values for Airlock
+# Override default values for production deployment
+
+# Higher replica count for production
+replicaCount: 3
+
+# Image configuration
+image:
+  pullPolicy: IfNotPresent
+
+# Ingress configuration for production
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/production-cert-id
+    alb.ingress.kubernetes.io/healthcheck-path: /live
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
+  hosts:
+    - host: airlock.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: airlock-production-tls
+      hosts:
+        - airlock.example.com
+
+# Production resource configuration
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+# Enable autoscaling in production
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+
+# Production persistence configuration
+persistence:
+  enabled: true
+  storageClass: "gp3"
+  size: 100Gi
+
+# Production-specific configuration
+config:
+  server:
+    addr: ":8080"
+    public_base_url: "https://airlock.example.com"
+    timeouts:
+      read: "30s"
+      write: "30s"
+      idle: "120s"
+
+  # Production OIDC configuration
+  auth:
+    oidc_issuer: "https://auth.example.com/.well-known/openid-configuration"
+    audience: "mcp-airlock-production"
+    jwks_cache_ttl: "5m"
+    clock_skew: "2m"
+    required_groups: ["mcp.users"]
+
+  # Policy configuration
+  policy:
+    rego_file: "/etc/airlock/policy.rego"
+    cache_ttl: "5m"  # Longer cache for production
+    reload_signal: "SIGHUP"
+
+  # Root virtualization for production
+  roots:
+    - name: "repo-readonly"
+      type: "fs"
+      virtual: "mcp://repo/"
+      real: "/var/airlock/mounts/repo"
+      read_only: true
+    - name: "production-artifacts"
+      type: "s3"
+      virtual: "mcp://artifacts/"
+      real: "s3://airlock-production-artifacts/"
+      read_only: false
+
+  # DLP configuration for production
+  dlp:
+    patterns:
+      - name: "email"
+        regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+        replace: "[redacted-email]"
+      - name: "bearer_token"
+        regex: '(?i)bearer\s+[a-z0-9._-]+'
+        replace: "[redacted-token]"
+      - name: "api_key"
+        regex: '(?i)api[_-]?key[_-]?[a-z0-9]+'
+        replace: "[redacted-api-key]"
+      - name: "password"
+        regex: '(?i)password[_-]?[a-z0-9]+'
+        replace: "[redacted-password]"
+      - name: "ssn"
+        regex: '\b\d{3}-\d{2}-\d{4}\b'
+        replace: "[redacted-ssn]"
+      - name: "credit_card"
+        regex: '\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
+        replace: "[redacted-cc]"
+
+  # Production rate limiting
+  rate_limiting:
+    per_token: "200/min"
+    per_ip: "1000/min"
+    burst: 50
+
+  # Upstream servers for production
+  upstreams:
+    - name: "docs-server"
+      type: "unix"
+      socket: "/run/mcp/docs.sock"
+      timeout: "30s"
+      allow_tools: ["search_docs", "read_file"]
+    - name: "analytics-server"
+      type: "stdio"
+      command: ["python", "-m", "mcp_server.analytics"]
+      env:
+        PYTHONPATH: "/opt/mcp-servers"
+        ENVIRONMENT: "production"
+      timeout: "30s"
+
+  # Audit configuration for production
+  audit:
+    backend: "sqlite"
+    database: "/var/lib/airlock/audit.db"
+    retention: "90d"  # Longer retention for production
+    export_format: "jsonl"
+
+  # Observability for production
+  observability:
+    metrics:
+      enabled: true
+      path: "/metrics"
+    tracing:
+      enabled: true
+      endpoint: "http://jaeger:14268/api/traces"
+    logging:
+      level: "info"  # Less verbose logging in production
+      format: "json"
+
+# Enable monitoring in production
+podMonitor:
+  enabled: true
+  namespace: "monitoring"
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    environment: production
+
+# Strict network policy for production
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443  # HTTPS only
+        - protocol: TCP
+          port: 53   # DNS
+        - protocol: UDP
+          port: 53   # DNS
+
+# Production pod annotations
+podAnnotations:
+  environment: "production"
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Production affinity rules
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - airlock
+        topologyKey: kubernetes.io/hostname
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-type
+              operator: In
+              values:
+                - production
+
+# Production tolerations
+tolerations:
+  - key: "production"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Extra environment variables for production
+extraEnvVars:
+  - name: ENVIRONMENT
+    value: "production"
+  - name: LOG_LEVEL
+    value: "info"
+  - name: OTEL_RESOURCE_ATTRIBUTES
+    value: "service.name=airlock,service.version=production,environment=production"

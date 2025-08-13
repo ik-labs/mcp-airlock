@@ -1,0 +1,281 @@
+# Default values for airlock
+# This is a YAML-formatted file.
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Image configuration
+image:
+  registry: ghcr.io
+  repository: ik-labs/mcp-airlock
+  tag: ""  # Defaults to Chart appVersion
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Deployment configuration
+replicaCount: 2
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  automountServiceAccountToken: false
+
+# Pod Security Context (Pod Security Admission compliant)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container Security Context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-path: /live
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+  hosts:
+    - host: airlock.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - airlock
+          topologyKey: kubernetes.io/hostname
+
+# Persistence for SQLite audit database (per-pod)
+persistence:
+  enabled: true
+  storageClass: "gp3"
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# Configuration
+config:
+  # Server configuration
+  server:
+    addr: ":8080"
+    public_base_url: "https://airlock.example.com"
+    timeouts:
+      read: "30s"
+      write: "30s"
+      idle: "120s"
+
+  # Authentication configuration
+  auth:
+    oidc_issuer: "https://auth.example.com/.well-known/openid-configuration"
+    audience: "mcp-airlock"
+    jwks_cache_ttl: "5m"
+    clock_skew: "2m"
+    required_groups: ["mcp.users"]
+
+  # Policy configuration
+  policy:
+    rego_file: "/etc/airlock/policy.rego"
+    cache_ttl: "1m"
+    reload_signal: "SIGHUP"
+
+  # Root virtualization
+  roots:
+    - name: "repo-readonly"
+      type: "fs"
+      virtual: "mcp://repo/"
+      real: "/var/airlock/mounts/repo"
+      read_only: true
+
+  # DLP configuration
+  dlp:
+    patterns:
+      - name: "email"
+        regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+        replace: "[redacted-email]"
+      - name: "bearer_token"
+        regex: '(?i)bearer\s+[a-z0-9._-]+'
+        replace: "[redacted-token]"
+
+  # Rate limiting
+  rate_limiting:
+    per_token: "200/min"
+    per_ip: "1000/min"
+    burst: 50
+
+  # Upstream servers
+  upstreams:
+    - name: "docs-server"
+      type: "unix"
+      socket: "/run/mcp/docs.sock"
+      timeout: "30s"
+      allow_tools: ["search_docs", "read_file"]
+
+  # Audit configuration
+  audit:
+    backend: "sqlite"
+    database: "/var/lib/airlock/audit.db"
+    retention: "30d"
+    export_format: "jsonl"
+
+  # Observability
+  observability:
+    metrics:
+      enabled: true
+      path: "/metrics"
+    tracing:
+      enabled: true
+      endpoint: "http://jaeger:14268/api/traces"
+    logging:
+      level: "info"
+      format: "json"
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443  # HTTPS for OIDC
+        - protocol: TCP
+          port: 53   # DNS
+        - protocol: UDP
+          port: 53   # DNS
+
+# Pod Monitor for Prometheus
+podMonitor:
+  enabled: false
+  namespace: ""
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  labels: {}
+  annotations: {}
+
+# Extra environment variables
+extraEnvVars: []
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Sidecar containers for MCP servers
+sidecars: []
+
+# Init containers
+initContainers: []
+
+# Probes configuration
+probes:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+    path: /live
+  readiness:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+    successThreshold: 1
+    path: /ready
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}
+
+# Service annotations
+serviceAnnotations: {}
+
+# Service labels
+serviceLabels: {}

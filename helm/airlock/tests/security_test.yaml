@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "airlock.fullname" . }}-test-security"
+  labels:
+    {{- include "airlock.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: security-test
+    image: alpine:3.19
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "Testing Airlock security configuration..."
+        
+        # Test that we're running as non-root
+        echo "Testing non-root execution..."
+        if [ "$(id -u)" -eq 0 ]; then
+          echo "❌ Running as root user"
+          exit 1
+        fi
+        echo "✓ Running as non-root user ($(id -u))"
+        
+        # Test read-only filesystem (should fail to write to root)
+        echo "Testing read-only filesystem..."
+        if touch /test-file 2>/dev/null; then
+          echo "❌ Root filesystem is writable"
+          exit 1
+        fi
+        echo "✓ Root filesystem is read-only"
+        
+        # Test that /tmp is writable
+        echo "Testing tmp directory..."
+        if ! touch /tmp/test-file; then
+          echo "❌ /tmp is not writable"
+          exit 1
+        fi
+        rm -f /tmp/test-file
+        echo "✓ /tmp is writable"
+        
+        # Test that we can't escalate privileges
+        echo "Testing privilege escalation prevention..."
+        if su - root 2>/dev/null; then
+          echo "❌ Privilege escalation possible"
+          exit 1
+        fi
+        echo "✓ Privilege escalation prevented"
+        
+        echo "All security tests passed!"
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir:
+        sizeLimit: 10Mi

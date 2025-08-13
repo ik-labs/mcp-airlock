@@ -1,0 +1,359 @@
+name: Security Scan
+
+on:
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/security-scan.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Dependency vulnerability scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck -json ./... > govulncheck-results.json || true
+
+      - name: Upload govulncheck results
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-results
+          path: govulncheck-results.json
+
+      - name: Run Trivy vulnerability scanner in repo mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-repo-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-repo-results.sarif'
+
+  # Container image vulnerability scanning
+  image-scan:
+    name: Container Image Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@v3
+        id: grype-scan
+        with:
+          image: ${{ env.IMAGE_NAME }}:scan
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Upload Grype scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ${{ steps.grype-scan.outputs.sarif }}
+
+  # Static code analysis
+  static-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run gosec security scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload gosec scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'gosec-results.sarif'
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Secrets scanning
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # License compliance check
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Check licenses
+        run: |
+          go-licenses check ./...
+          go-licenses csv ./... > licenses.csv
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: licenses.csv
+
+  # SBOM generation
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for SBOM
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:sbom
+          cache-from: type=gha
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:sbom
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  # Security policy compliance
+  policy-check:
+    name: Security Policy Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for policy check
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:policy
+          cache-from: type=gha
+
+      - name: Run Conftest policy checks
+        run: |
+          # Install conftest
+          curl -L https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz | tar xz
+          sudo mv conftest /usr/local/bin
+          
+          # Create security policies
+          mkdir -p policies
+          cat > policies/security.rego << 'EOF'
+          package main
+
+          import rego.v1
+
+          # Deny running as root
+          deny contains msg if {
+              input.Config.User == "root"
+              msg := "Container runs as root user"
+          }
+
+          deny contains msg if {
+              input.Config.User == "0"
+              msg := "Container runs as root user (UID 0)"
+          }
+
+          # Require non-root user
+          deny contains msg if {
+              not input.Config.User
+              msg := "Container must specify a non-root user"
+          }
+
+          # Check for exposed ports
+          warn contains msg if {
+              input.Config.ExposedPorts
+              count(input.Config.ExposedPorts) > 1
+              msg := "Container exposes multiple ports"
+          }
+
+          # Check for health check
+          warn contains msg if {
+              not input.Config.Healthcheck
+              msg := "Container should have a health check"
+          }
+          EOF
+          
+          # Run policy checks
+          docker save ${{ env.IMAGE_NAME }}:policy | conftest verify --policy policies -
+
+  # Generate security report
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, image-scan, static-analysis, secrets-scan, license-check, sbom, policy-check]
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate security report
+        run: |
+          cat > security-report.md << 'EOF'
+          # Security Scan Report
+          
+          Generated on: $(date -u)
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+          
+          ## Scan Results
+          
+          ### Dependency Vulnerabilities
+          - govulncheck results: See govulncheck-results artifact
+          - Trivy repository scan: See GitHub Security tab
+          
+          ### Container Image Vulnerabilities
+          - Trivy image scan: See GitHub Security tab
+          - Grype scan: See GitHub Security tab
+          
+          ### Static Code Analysis
+          - gosec scan: See GitHub Security tab
+          - CodeQL analysis: See GitHub Security tab
+          
+          ### Secrets Scanning
+          - TruffleHog scan: Check workflow logs
+          
+          ### License Compliance
+          - License report: See license-report artifact
+          
+          ### SBOM
+          - Software Bill of Materials: See sbom artifact
+          
+          ### Policy Compliance
+          - Security policy checks: Check workflow logs
+          
+          ## Recommendations
+          
+          1. Review all HIGH and CRITICAL vulnerabilities
+          2. Update dependencies with known vulnerabilities
+          3. Address any secrets found in the codebase
+          4. Ensure license compliance for all dependencies
+          5. Review and address policy violations
+          
+          EOF
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report.md

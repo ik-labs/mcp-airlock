@@ -1,0 +1,41 @@
+# Dockerfile for MCP Analytics Server
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r mcp && useradd -r -g mcp -u 1001 mcp
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements (if you have them)
+# COPY requirements.txt .
+# RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the server script
+COPY analytics-server.py .
+
+# Create necessary directories
+RUN mkdir -p /var/lib/analytics /run/mcp /var/lib/mcp && \
+    chown -R mcp:mcp /app /var/lib/analytics /run/mcp /var/lib/mcp
+
+# Switch to non-root user
+USER mcp
+
+# Set environment variables
+ENV ANALYTICS_DB_PATH=/var/lib/analytics/analytics.db
+ENV MCP_SOCKET_PATH=/run/mcp/analytics.sock
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import socket, os; s=socket.socket(socket.AF_UNIX); s.connect(os.environ['MCP_SOCKET_PATH']); s.close()" || exit 1
+
+# Run the server
+CMD ["python", "analytics-server.py"]

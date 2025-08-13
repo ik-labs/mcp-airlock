@@ -1,0 +1,372 @@
+# HTTP Service Upstream Example
+# This example shows how to configure Airlock to connect to MCP servers via HTTP services
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airlock-http-upstream-config
+  namespace: airlock-production
+data:
+  config.yaml: |
+    server:
+      addr: ":8080"
+      public_base_url: "https://airlock.yourdomain.com"
+      timeouts:
+        read: "30s"
+        write: "30s"
+        idle: "120s"
+
+    auth:
+      oidc_issuer: "https://auth.yourdomain.com/.well-known/openid-configuration"
+      audience: "mcp-airlock-production"
+      jwks_cache_ttl: "5m"
+      clock_skew: "2m"
+      required_groups: ["mcp.users"]
+
+    policy:
+      rego_file: "/etc/airlock/policy.rego"
+      cache_ttl: "5m"
+      reload_signal: "SIGHUP"
+
+    roots:
+      - name: "repo-readonly"
+        type: "fs"
+        virtual: "mcp://repo/"
+        real: "/mnt/repositories"
+        read_only: true
+      - name: "artifacts"
+        type: "s3"
+        virtual: "mcp://artifacts/"
+        real: "s3://your-artifacts-bucket/"
+        read_only: false
+
+    dlp:
+      patterns:
+        - name: "email"
+          regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+          replace: "[redacted-email]"
+        - name: "bearer_token"
+          regex: '(?i)bearer\s+[a-z0-9._-]+'
+          replace: "[redacted-token]"
+        - name: "api_key"
+          regex: '(?i)api[_-]?key[_-]?[a-z0-9]+'
+          replace: "[redacted-api-key]"
+
+    rate_limiting:
+      per_token: "200/min"
+      per_ip: "1000/min"
+      burst: 50
+
+    # HTTP service upstream configuration
+    upstreams:
+      - name: "docs-service"
+        type: "http"
+        url: "http://docs-mcp-service:8080"
+        timeout: "30s"
+        allow_tools: ["search_docs", "read_file", "list_directory"]
+        headers:
+          Authorization: "Bearer ${MCP_DOCS_TOKEN}"
+          X-Service-Name: "airlock-gateway"
+      - name: "analytics-service"
+        type: "http"
+        url: "http://analytics-mcp-service:8080"
+        timeout: "45s"
+        allow_tools: ["query_metrics", "generate_report", "export_data"]
+        headers:
+          Authorization: "Bearer ${MCP_ANALYTICS_TOKEN}"
+          X-Service-Name: "airlock-gateway"
+      - name: "code-service"
+        type: "http"
+        url: "http://code-mcp-service:8080"
+        timeout: "60s"
+        allow_tools: ["read_code", "search_code", "analyze_code"]
+        headers:
+          Authorization: "Bearer ${MCP_CODE_TOKEN}"
+          X-Service-Name: "airlock-gateway"
+
+    audit:
+      backend: "sqlite"
+      database: "/var/lib/airlock/audit.db"
+      retention: "90d"
+      export_format: "jsonl"
+
+    observability:
+      metrics:
+        enabled: true
+        path: "/metrics"
+      tracing:
+        enabled: true
+        endpoint: "http://jaeger:14268/api/traces"
+      logging:
+        level: "info"
+        format: "json"
+
+  policy.rego: |
+    package airlock.authz
+
+    import rego.v1
+
+    # Default deny
+    default allow := false
+
+    # Allow if user has required group and tool is permitted
+    allow if {
+        input.groups[_] == "mcp.users"
+        allowed_tool[input.tool]
+        allowed_resource[input.resource]
+    }
+
+    # Define allowed tools per service
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["search_docs", "read_file", "list_directory"]
+        input.groups[_] == "mcp.users"
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["query_metrics", "generate_report"]
+        input.groups[_] == "mcp.analytics.users"
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["read_code", "search_code"]
+        input.groups[_] == "mcp.developers"
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["analyze_code", "export_data"]
+        input.groups[_] == "mcp.power.users"
+    }
+
+    # Define allowed resources
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://repo/")
+        not contains(resource, "../")
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://artifacts/")
+        input.groups[_] in ["mcp.developers", "mcp.power.users"]
+    }
+---
+# Deployment with HTTP upstream configuration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airlock-http-upstream
+  namespace: airlock-production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+      app.kubernetes.io/instance: airlock-http-upstream
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airlock
+        app.kubernetes.io/instance: airlock-http-upstream
+    spec:
+      serviceAccountName: airlock-production
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airlock
+          image: ghcr.io/ik-labs/mcp-airlock:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 256Mi
+          env:
+            - name: CONFIG_FILE
+              value: "/etc/airlock/config.yaml"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+            # Service tokens from secrets
+            - name: MCP_DOCS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-tokens
+                  key: docs-token
+            - name: MCP_ANALYTICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-tokens
+                  key: analytics-token
+            - name: MCP_CODE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-tokens
+                  key: code-token
+          volumeMounts:
+            - name: config
+              mountPath: /etc/airlock
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/airlock
+            - name: tmp
+              mountPath: /tmp
+            - name: var-run
+              mountPath: /var/run
+            - name: repositories
+              mountPath: /mnt/repositories
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: airlock-http-upstream-config
+            defaultMode: 0444
+        - name: data
+          persistentVolumeClaim:
+            claimName: airlock-production-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: var-run
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: repositories
+          persistentVolumeClaim:
+            claimName: repositories-pvc
+---
+# Secret for MCP service authentication tokens
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-service-tokens
+  namespace: airlock-production
+type: Opaque
+data:
+  # Base64 encoded tokens (replace with actual tokens)
+  docs-token: ZG9jcy1zZXJ2aWNlLXRva2VuLWhlcmU=
+  analytics-token: YW5hbHl0aWNzLXNlcnZpY2UtdG9rZW4taGVyZQ==
+  code-token: Y29kZS1zZXJ2aWNlLXRva2VuLWhlcmU=
+---
+# Example MCP service deployment (docs service)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docs-mcp-service
+  namespace: airlock-production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: docs-mcp-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: docs-mcp-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: docs-server
+          image: python:3.11-slim
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          command:
+            - python
+            - -m
+            - mcp_server.docs
+            - --http
+            - --port
+            - "8080"
+          env:
+            - name: DOCS_ROOT
+              value: "/mnt/docs"
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-tokens
+                  key: docs-token
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: docs-volume
+              mountPath: /mnt/docs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: docs-volume
+          persistentVolumeClaim:
+            claimName: docs-pvc
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+---
+# Service for docs MCP server
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs-mcp-service
+  namespace: airlock-production
+spec:
+  selector:
+    app.kubernetes.io/name: docs-mcp-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

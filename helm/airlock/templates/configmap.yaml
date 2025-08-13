@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "airlock.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "airlock.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+  policy.rego: |
+    package airlock.authz
+
+    import rego.v1
+
+    # Default deny
+    default allow := false
+
+    # Allow if user has required group and tool is permitted
+    allow if {
+        input.groups[_] == "mcp.users"
+        allowed_tool[input.tool]
+        allowed_resource[input.resource]
+    }
+
+    # Define allowed tools per tenant/group
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["search_docs", "read_file", "list_directory"]
+        input.groups[_] == "mcp.users"
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["read_file", "read_directory", "read_config", "search_docs"]
+        input.groups[_] == "mcp.power_users"
+    }
+
+    # Define allowed resources with path restrictions
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://repo/")
+        not contains(resource, "../")
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://artifacts/")
+        input.groups[_] == "mcp.writers"
+    }
+
+    # Deny reasons for debugging
+    deny_reason contains msg if {
+        not input.groups[_] == "mcp.users"
+        msg := "user not in required group"
+    }
+
+    deny_reason contains msg if {
+        not allowed_tool[input.tool]
+        msg := sprintf("tool '%s' not allowed", [input.tool])
+    }
+
+    deny_reason contains msg if {
+        not allowed_resource[input.resource]
+        msg := sprintf("resource '%s' not allowed", [input.resource])
+    }

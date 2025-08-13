@@ -205,29 +205,29 @@
   - Create API documentation and integration examples
   - _Requirements: R5.1, R7.5_
 
-- [ ] 11. Kubernetes deployment and packaging
-- [ ] 11.1 Create Docker images and Helm charts with modern security
+- [x] 11. Kubernetes deployment and packaging
+- [x] 11.1 Create Docker images and Helm charts with modern security
   - Implement multi-stage Docker builds with non-root user and read-only filesystem
   - Create Helm charts with Pod Security Admission (PSA) levels and NetworkPolicy
   - Add per-pod SQLite PVC configuration (no sharing across replicas)
   - Write deployment tests for Kubernetes environments with security validation
   - _Requirements: R5.1, R5.5, R17.3_
 
-- [ ] 11.2 Add CI/CD pipeline with security scanning
+- [x] 11.2 Add CI/CD pipeline with security scanning
   - Implement GitHub Actions workflow with automated testing
   - Add Trivy security scanning and Cosign image signing
   - Create automated deployment to staging environments
   - Write integration tests for CI/CD pipeline and deployment validation
   - _Requirements: R5.1, R5.5_
 
-- [ ] 11.3 Create production-ready Helm values and deployment examples
+- [x] 11.3 Create production-ready Helm values and deployment examples
   - Create Helm values templates for single-VPC AWS deployment with ALB ingress
   - Add sidecar and HTTP service upstream configuration examples
   - Implement EFS/EBS and S3 virtual root integration examples
   - Write deployment validation tests for Kubernetes environments
   - _Requirements: R17.1, R17.2, R17.3, R17.4_
 
-- [ ] 11.4 Build sample MCP servers and integration test harness
+- [x] 11.4 Build sample MCP servers and integration test harness
   - Create sample MCP servers (docs, analytics) for demonstration
   - Implement Unix socket sidecar deployment patterns
   - Add end-to-end integration test harness with real MCP clients

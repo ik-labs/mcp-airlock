@@ -1,0 +1,496 @@
+# EFS and S3 Integration Example
+# This example shows how to integrate Airlock with AWS EFS for filesystem roots and S3 for object storage
+
+# EFS CSI Driver StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-0123456789abcdef0  # Replace with your EFS ID
+  directoryPerms: "0755"
+  uid: "1001"
+  gid: "1001"
+---
+# EFS PersistentVolume for repositories
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: efs-repositories-pv
+spec:
+  capacity:
+    storage: 1000Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: fs-0123456789abcdef0:/repositories
+    volumeAttributes:
+      path: /repositories
+      uid: "1001"
+      gid: "1001"
+      dirMode: "0755"
+      fileMode: "0644"
+---
+# EFS PersistentVolumeClaim for repositories
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: efs-repositories-pvc
+  namespace: airlock-production
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 1000Gi
+---
+# EFS PersistentVolume for documentation
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: efs-docs-pv
+spec:
+  capacity:
+    storage: 100Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: fs-0123456789abcdef0:/documentation
+    volumeAttributes:
+      path: /documentation
+      uid: "1001"
+      gid: "1001"
+      dirMode: "0755"
+      fileMode: "0644"
+---
+# EFS PersistentVolumeClaim for documentation
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: efs-docs-pvc
+  namespace: airlock-production
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 100Gi
+---
+# ServiceAccount with S3 access
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airlock-s3-access
+  namespace: airlock-production
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/AirlockS3AccessRole
+---
+# ConfigMap with EFS and S3 configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airlock-efs-s3-config
+  namespace: airlock-production
+data:
+  config.yaml: |
+    server:
+      addr: ":8080"
+      public_base_url: "https://airlock.yourdomain.com"
+      timeouts:
+        read: "30s"
+        write: "30s"
+        idle: "120s"
+
+    auth:
+      oidc_issuer: "https://auth.yourdomain.com/.well-known/openid-configuration"
+      audience: "mcp-airlock-production"
+      jwks_cache_ttl: "5m"
+      clock_skew: "2m"
+      required_groups: ["mcp.users"]
+
+    policy:
+      rego_file: "/etc/airlock/policy.rego"
+      cache_ttl: "5m"
+      reload_signal: "SIGHUP"
+
+    # Root virtualization with EFS and S3
+    roots:
+      - name: "repositories-readonly"
+        type: "fs"
+        virtual: "mcp://repo/"
+        real: "/mnt/efs/repositories"
+        read_only: true
+        metadata:
+          description: "Read-only access to code repositories"
+          backend: "efs"
+          filesystem_id: "fs-0123456789abcdef0"
+      
+      - name: "documentation-readonly"
+        type: "fs"
+        virtual: "mcp://docs/"
+        real: "/mnt/efs/documentation"
+        read_only: true
+        metadata:
+          description: "Read-only access to documentation"
+          backend: "efs"
+          filesystem_id: "fs-0123456789abcdef0"
+      
+      - name: "artifacts-readwrite"
+        type: "s3"
+        virtual: "mcp://artifacts/"
+        real: "s3://your-airlock-artifacts-bucket/"
+        read_only: false
+        metadata:
+          description: "Read-write access to build artifacts"
+          backend: "s3"
+          bucket: "your-airlock-artifacts-bucket"
+          region: "us-west-2"
+      
+      - name: "logs-readonly"
+        type: "s3"
+        virtual: "mcp://logs/"
+        real: "s3://your-airlock-logs-bucket/"
+        read_only: true
+        metadata:
+          description: "Read-only access to application logs"
+          backend: "s3"
+          bucket: "your-airlock-logs-bucket"
+          region: "us-west-2"
+      
+      - name: "backups-readonly"
+        type: "s3"
+        virtual: "mcp://backups/"
+        real: "s3://your-airlock-backups-bucket/"
+        read_only: true
+        metadata:
+          description: "Read-only access to backups"
+          backend: "s3"
+          bucket: "your-airlock-backups-bucket"
+          region: "us-west-2"
+
+    dlp:
+      patterns:
+        - name: "email"
+          regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+          replace: "[redacted-email]"
+        - name: "bearer_token"
+          regex: '(?i)bearer\s+[a-z0-9._-]+'
+          replace: "[redacted-token]"
+        - name: "aws_access_key"
+          regex: 'AKIA[0-9A-Z]{16}'
+          replace: "[redacted-aws-key]"
+        - name: "aws_secret_key"
+          regex: '[A-Za-z0-9/+=]{40}'
+          replace: "[redacted-aws-secret]"
+
+    rate_limiting:
+      per_token: "200/min"
+      per_ip: "1000/min"
+      burst: 50
+
+    upstreams:
+      - name: "docs-server"
+        type: "unix"
+        socket: "/run/mcp/docs.sock"
+        timeout: "30s"
+        allow_tools: ["search_docs", "read_file", "list_directory"]
+      - name: "repo-server"
+        type: "unix"
+        socket: "/run/mcp/repo.sock"
+        timeout: "30s"
+        allow_tools: ["read_code", "search_code", "list_files"]
+
+    audit:
+      backend: "sqlite"
+      database: "/var/lib/airlock/audit.db"
+      retention: "90d"
+      export_format: "jsonl"
+      # Optional S3 export for long-term storage
+      s3_export:
+        enabled: true
+        bucket: "your-airlock-audit-bucket"
+        prefix: "audit-logs/"
+        region: "us-west-2"
+
+    observability:
+      metrics:
+        enabled: true
+        path: "/metrics"
+      tracing:
+        enabled: true
+        endpoint: "http://jaeger:14268/api/traces"
+      logging:
+        level: "info"
+        format: "json"
+
+  policy.rego: |
+    package airlock.authz
+
+    import rego.v1
+
+    # Default deny
+    default allow := false
+
+    # Allow if user has required group and tool is permitted
+    allow if {
+        input.groups[_] == "mcp.users"
+        allowed_tool[input.tool]
+        allowed_resource[input.resource]
+    }
+
+    # Define allowed tools
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["search_docs", "read_file", "list_directory"]
+        input.groups[_] == "mcp.users"
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["read_code", "search_code", "list_files"]
+        input.groups[_] == "mcp.developers"
+    }
+
+    # Define allowed resources with backend-specific rules
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://repo/")
+        not contains(resource, "../")
+        input.groups[_] == "mcp.developers"
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://docs/")
+        not contains(resource, "../")
+        input.groups[_] == "mcp.users"
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://artifacts/")
+        input.groups[_] in ["mcp.developers", "mcp.ci.users"]
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://logs/")
+        input.groups[_] in ["mcp.operators", "mcp.developers"]
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://backups/")
+        input.groups[_] == "mcp.operators"
+    }
+---
+# Deployment with EFS and S3 integration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airlock-efs-s3
+  namespace: airlock-production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+      app.kubernetes.io/instance: airlock-efs-s3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airlock
+        app.kubernetes.io/instance: airlock-efs-s3
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: airlock-s3-access
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airlock
+          image: ghcr.io/ik-labs/mcp-airlock:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 256Mi
+          env:
+            - name: CONFIG_FILE
+              value: "/etc/airlock/config.yaml"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+            # AWS configuration
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/airlock
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/airlock
+            - name: tmp
+              mountPath: /tmp
+            - name: var-run
+              mountPath: /var/run
+            # EFS mounts
+            - name: efs-repositories
+              mountPath: /mnt/efs/repositories
+              readOnly: true
+            - name: efs-docs
+              mountPath: /mnt/efs/documentation
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: airlock-efs-s3-config
+            defaultMode: 0444
+        - name: data
+          persistentVolumeClaim:
+            claimName: airlock-production-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: var-run
+          emptyDir:
+            sizeLimit: 100Mi
+        # EFS volumes
+        - name: efs-repositories
+          persistentVolumeClaim:
+            claimName: efs-repositories-pvc
+        - name: efs-docs
+          persistentVolumeClaim:
+            claimName: efs-docs-pvc
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - airlock
+              topologyKey: kubernetes.io/hostname
+---
+# IAM Role for S3 access (to be created via Terraform/CloudFormation)
+# This is a reference - create this role in your AWS account
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-iam-role-reference
+  namespace: airlock-production
+data:
+  iam-role-policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::your-airlock-artifacts-bucket",
+            "arn:aws:s3:::your-airlock-artifacts-bucket/*"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::your-airlock-logs-bucket",
+            "arn:aws:s3:::your-airlock-logs-bucket/*",
+            "arn:aws:s3:::your-airlock-backups-bucket",
+            "arn:aws:s3:::your-airlock-backups-bucket/*"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutObject"
+          ],
+          "Resource": [
+            "arn:aws:s3:::your-airlock-audit-bucket/audit-logs/*"
+          ]
+        }
+      ]
+    }
+
+  trust-policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E:sub": "system:serviceaccount:airlock-production:airlock-s3-access",
+              "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E:aud": "sts.amazonaws.com"
+            }
+          }
+        }
+      ]
+    }

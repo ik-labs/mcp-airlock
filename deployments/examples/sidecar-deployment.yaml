@@ -1,0 +1,357 @@
+# Sidecar Deployment Example
+# This example shows how to deploy Airlock with MCP servers as sidecars
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airlock-with-sidecars
+  namespace: airlock-production
+  labels:
+    app.kubernetes.io/name: airlock
+    app.kubernetes.io/instance: airlock-production
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+      app.kubernetes.io/instance: airlock-production
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airlock
+        app.kubernetes.io/instance: airlock-production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: airlock-production
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # Main Airlock container
+        - name: airlock
+          image: ghcr.io/ik-labs/mcp-airlock:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 256Mi
+          env:
+            - name: CONFIG_FILE
+              value: "/etc/airlock/config.yaml"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/airlock
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/airlock
+            - name: tmp
+              mountPath: /tmp
+            - name: var-run
+              mountPath: /var/run
+            - name: mcp-sockets
+              mountPath: /run/mcp
+
+        # Documentation MCP Server Sidecar
+        - name: docs-server
+          image: python:3.11-slim
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - python
+            - -m
+            - mcp_server.docs
+          env:
+            - name: MCP_SOCKET_PATH
+              value: "/run/mcp/docs.sock"
+            - name: DOCS_ROOT
+              value: "/mnt/docs"
+            - name: PYTHONPATH
+              value: "/opt/mcp-servers"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: mcp-sockets
+              mountPath: /run/mcp
+            - name: docs-volume
+              mountPath: /mnt/docs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: python-cache
+              mountPath: /home/nonroot/.cache
+
+        # Analytics MCP Server Sidecar
+        - name: analytics-server
+          image: python:3.11-slim
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - python
+            - -m
+            - mcp_server.analytics
+          env:
+            - name: MCP_SOCKET_PATH
+              value: "/run/mcp/analytics.sock"
+            - name: ANALYTICS_DB_PATH
+              value: "/var/lib/analytics/analytics.db"
+            - name: PYTHONPATH
+              value: "/opt/mcp-servers"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: mcp-sockets
+              mountPath: /run/mcp
+            - name: analytics-data
+              mountPath: /var/lib/analytics
+            - name: tmp
+              mountPath: /tmp
+            - name: python-cache
+              mountPath: /home/nonroot/.cache
+
+      volumes:
+        - name: config
+          configMap:
+            name: airlock-production-config
+            defaultMode: 0444
+        - name: data
+          persistentVolumeClaim:
+            claimName: airlock-production-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: var-run
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: mcp-sockets
+          emptyDir:
+            sizeLimit: 10Mi
+        - name: docs-volume
+          persistentVolumeClaim:
+            claimName: docs-pvc
+        - name: analytics-data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: python-cache
+          emptyDir:
+            sizeLimit: 100Mi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - airlock
+                topologyKey: kubernetes.io/hostname
+---
+# ConfigMap with sidecar-specific configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airlock-production-config
+  namespace: airlock-production
+data:
+  config.yaml: |
+    server:
+      addr: ":8080"
+      public_base_url: "https://airlock.yourdomain.com"
+      timeouts:
+        read: "30s"
+        write: "30s"
+        idle: "120s"
+
+    auth:
+      oidc_issuer: "https://auth.yourdomain.com/.well-known/openid-configuration"
+      audience: "mcp-airlock-production"
+      jwks_cache_ttl: "5m"
+      clock_skew: "2m"
+      required_groups: ["mcp.users"]
+
+    policy:
+      rego_file: "/etc/airlock/policy.rego"
+      cache_ttl: "5m"
+      reload_signal: "SIGHUP"
+
+    roots:
+      - name: "docs-readonly"
+        type: "fs"
+        virtual: "mcp://docs/"
+        real: "/mnt/docs"
+        read_only: true
+
+    dlp:
+      patterns:
+        - name: "email"
+          regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+          replace: "[redacted-email]"
+        - name: "bearer_token"
+          regex: '(?i)bearer\s+[a-z0-9._-]+'
+          replace: "[redacted-token]"
+
+    rate_limiting:
+      per_token: "200/min"
+      per_ip: "1000/min"
+      burst: 50
+
+    # Sidecar upstream configuration
+    upstreams:
+      - name: "docs-server"
+        type: "unix"
+        socket: "/run/mcp/docs.sock"
+        timeout: "30s"
+        allow_tools: ["search_docs", "read_file", "list_directory"]
+      - name: "analytics-server"
+        type: "unix"
+        socket: "/run/mcp/analytics.sock"
+        timeout: "30s"
+        allow_tools: ["query_metrics", "generate_report"]
+
+    audit:
+      backend: "sqlite"
+      database: "/var/lib/airlock/audit.db"
+      retention: "90d"
+      export_format: "jsonl"
+
+    observability:
+      metrics:
+        enabled: true
+        path: "/metrics"
+      tracing:
+        enabled: true
+        endpoint: "http://jaeger:14268/api/traces"
+      logging:
+        level: "info"
+        format: "json"
+
+  policy.rego: |
+    package airlock.authz
+
+    import rego.v1
+
+    # Default deny
+    default allow := false
+
+    # Allow if user has required group and tool is permitted
+    allow if {
+        input.groups[_] == "mcp.users"
+        allowed_tool[input.tool]
+        allowed_resource[input.resource]
+    }
+
+    # Define allowed tools for sidecar servers
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["search_docs", "read_file", "list_directory"]
+        input.groups[_] == "mcp.users"
+        startswith(input.resource, "mcp://docs/")
+    }
+
+    allowed_tool contains tool if {
+        tool := input.tool
+        tool in ["query_metrics", "generate_report"]
+        input.groups[_] == "mcp.analytics.users"
+    }
+
+    # Define allowed resources
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://docs/")
+        not contains(resource, "../")
+    }
+
+    allowed_resource contains resource if {
+        resource := input.resource
+        startswith(resource, "mcp://analytics/")
+        input.groups[_] == "mcp.analytics.users"
+    }
+---
+# PVC for documentation files
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: docs-pvc
+  namespace: airlock-production
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: efs-sc

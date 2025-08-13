@@ -1,0 +1,23 @@
+apiVersion: v2
+name: airlock
+description: A Helm chart for MCP Airlock - Zero-trust gateway for Model Context Protocol servers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/ik-labs/mcp-airlock
+sources:
+  - https://github.com/ik-labs/mcp-airlock
+maintainers:
+  - name: MCP Airlock Team
+    email: team@example.com
+keywords:
+  - mcp
+  - security
+  - gateway
+  - zero-trust
+  - model-context-protocol
+annotations:
+  category: Security
+  licenses: Apache-2.0
+dependencies: []
+kubeVersion: ">=1.25.0"

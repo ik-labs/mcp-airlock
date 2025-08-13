@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "airlock.fullname" . }}-test-deployment"
+  labels:
+    {{- include "airlock.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: deployment-test
+    image: curlimages/curl:8.5.0
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "Testing Airlock deployment..."
+        
+        # Test service is accessible
+        echo "Testing service accessibility..."
+        curl -f -s -o /dev/null http://{{ include "airlock.fullname" . }}:{{ .Values.service.port }}/live || exit 1
+        echo "✓ Service is accessible"
+        
+        # Test health endpoints
+        echo "Testing liveness endpoint..."
+        curl -f -s http://{{ include "airlock.fullname" . }}:{{ .Values.service.port }}/live | grep -q "ok" || exit 1
+        echo "✓ Liveness endpoint working"
+        
+        echo "Testing readiness endpoint..."
+        curl -f -s http://{{ include "airlock.fullname" . }}:{{ .Values.service.port }}/ready | grep -q "ok" || exit 1
+        echo "✓ Readiness endpoint working"
+        
+        # Test info endpoint
+        echo "Testing info endpoint..."
+        curl -f -s http://{{ include "airlock.fullname" . }}:{{ .Values.service.port }}/info | grep -q "version" || exit 1
+        echo "✓ Info endpoint working"
+        
+        echo "All deployment tests passed!"
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir:
+        sizeLimit: 10Mi
