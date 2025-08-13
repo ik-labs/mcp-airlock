@@ -1,0 +1,120 @@
+groups:
+  - name: mcp-airlock-performance
+    rules:
+      # Latency alerts
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, rate(airlock_request_duration_seconds_bucket[5m])) > 0.06
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "MCP Airlock P95 latency is high"
+          description: "P95 latency is {{ $value }}s, exceeding 60ms threshold"
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, rate(airlock_request_duration_seconds_bucket[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: performance
+        annotations:
+          summary: "MCP Airlock P99 latency is very high"
+          description: "P99 latency is {{ $value }}s, exceeding 100ms threshold"
+
+      # Throughput alerts
+      - alert: LowThroughput
+        expr: rate(airlock_requests_total[5m]) * 60 < 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "MCP Airlock throughput is low"
+          description: "Throughput is {{ $value }} req/min, below 1000 req/min threshold"
+
+      # Memory alerts
+      - alert: HighMemoryUsage
+        expr: airlock_memory_usage_bytes / 1024 / 1024 > 200
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "MCP Airlock memory usage is high"
+          description: "Memory usage is {{ $value }}MB, exceeding 200MB threshold"
+
+      - alert: CriticalMemoryUsage
+        expr: airlock_memory_usage_bytes / 1024 / 1024 > 400
+        for: 1m
+        labels:
+          severity: critical
+          component: performance
+        annotations:
+          summary: "MCP Airlock memory usage is critical"
+          description: "Memory usage is {{ $value }}MB, exceeding 400MB threshold" 
+     # GC alerts
+      - alert: HighGCDuration
+        expr: histogram_quantile(0.95, rate(airlock_gc_duration_seconds_bucket[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "MCP Airlock GC duration is high"
+          description: "P95 GC duration is {{ $value }}s, exceeding 100ms threshold"
+
+      # Goroutine alerts
+      - alert: HighGoroutineCount
+        expr: airlock_goroutines_total > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "MCP Airlock goroutine count is high"
+          description: "Goroutine count is {{ $value }}, exceeding 1000 threshold"
+
+      # Error rate alerts
+      - alert: HighErrorRate
+        expr: rate(airlock_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: reliability
+        annotations:
+          summary: "MCP Airlock error rate is high"
+          description: "Error rate is {{ $value }} errors/sec"
+
+      # Authentication alerts
+      - alert: HighAuthFailureRate
+        expr: rate(airlock_auth_events_total{result="failure"}[5m]) / rate(airlock_auth_events_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "MCP Airlock authentication failure rate is high"
+          description: "Auth failure rate is {{ $value | humanizePercentage }}"
+
+      # Policy alerts
+      - alert: HighPolicyDenyRate
+        expr: rate(airlock_policy_decisions_total{decision="deny"}[5m]) / rate(airlock_policy_decisions_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: info
+          component: security
+        annotations:
+          summary: "MCP Airlock policy deny rate is high"
+          description: "Policy deny rate is {{ $value | humanizePercentage }}"
+
+      # Upstream alerts
+      - alert: HighUpstreamLatency
+        expr: histogram_quantile(0.95, rate(airlock_upstream_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: upstream
+        annotations:
+          summary: "MCP Airlock upstream latency is high"
+          description: "P95 upstream latency is {{ $value }}s"

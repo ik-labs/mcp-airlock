@@ -1,0 +1,17 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/ik-labs/mcp-airlock/pkg/observability
+cpu: Apple M1 Pro
+BenchmarkContextOperations/WithCorrelationID-8         	12481006	       108.5 ns/op	      64 B/op	       2 allocs/op
+BenchmarkContextOperations/GetCorrelationID-8          	268264604	         4.790 ns/op	       0 B/op	       0 allocs/op
+BenchmarkContextOperations/EnrichContext-8             	 5792767	       324.9 ns/op	     320 B/op	      10 allocs/op
+BenchmarkContextOperations/GetRequestMetadata-8        	      18	  67781546 ns/op	     112 B/op	       1 allocs/op
+BenchmarkContextOperations/GenerateCorrelationID-8     	 3723541	       333.8 ns/op	      64 B/op	       2 allocs/op
+--- FAIL: BenchmarkMiddlewareOperations
+    logger.go:146: 2025-08-13T11:34:37.871+0530	INFO	OpenTelemetry tracing initialized	{"endpoint": "http://localhost:4318/v1/traces"}
+    middleware_test.go:366: 
+        	Error Trace:	/Users/himeshp/apps/hackthons/airlock/pkg/observability/middleware_test.go:366
+        	Error:      	Received unexpected error:
+        	            	failed to initialize metrics: failed to create metric exporter: parse "http://http:%2F%2Flocalhost:4318%2Fv1%2Fmetrics/v1/metrics": invalid port ":4318%2Fv1%2Fmetrics" after host
+        	Test:       	BenchmarkMiddlewareOperations
+BenchmarkPerformanceMonitor/RecordLatency-8            	
