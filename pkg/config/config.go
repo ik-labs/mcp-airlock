@@ -127,14 +127,15 @@ type ObservabilityConfig struct {
 
 // MetricsConfig contains metrics configuration
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Path    string `mapstructure:"path"`
+	Enabled  bool   `mapstructure:"enabled"`
+	Path     string `mapstructure:"path"`
+	Endpoint string `mapstructure:"endpoint" validate:"omitempty,url"`
 }
 
 // TracingConfig contains tracing configuration
 type TracingConfig struct {
 	Enabled  bool   `mapstructure:"enabled"`
-	Endpoint string `mapstructure:"endpoint"`
+	Endpoint string `mapstructure:"endpoint" validate:"omitempty,url"`
 }
 
 // LoggingConfig contains logging configuration

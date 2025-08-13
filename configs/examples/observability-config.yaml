@@ -1,0 +1,78 @@
+# Example configuration for MCP Airlock with OpenTelemetry observability
+
+server:
+  addr: ":8080"
+  public_base_url: "https://airlock.example.com"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+    connect: "2s"
+    upstream: "30s"
+
+auth:
+  oidc_issuer: "https://auth.example.com/.well-known/openid-configuration"
+  audience: "mcp-airlock"
+  jwks_cache_ttl: "5m"
+  clock_skew: "2m"
+  required_groups: ["mcp.users"]
+
+policy:
+  rego_file: "configs/policy.rego"
+  cache_ttl: "1m"
+  reload_signal: "SIGHUP"
+
+roots:
+  - name: "repo-readonly"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/var/airlock/mounts/repo"
+    read_only: true
+
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+
+rate_limiting:
+  per_token: "200/min"
+  per_ip: "1000/min"
+  burst: 50
+
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/run/mcp/docs.sock"
+    timeout: "30s"
+    allow_tools: ["search_docs", "read_file"]
+
+audit:
+  backend: "sqlite"
+  database: "/var/lib/airlock/audit.db"
+  retention: "30d"
+  export_format: "jsonl"
+
+# OpenTelemetry Observability Configuration
+observability:
+  # Metrics configuration
+  metrics:
+    enabled: true
+    path: "/metrics"                                    # Prometheus metrics endpoint
+    endpoint: "http://otel-collector:4318/v1/metrics"   # OTLP metrics endpoint
+  
+  # Tracing configuration
+  tracing:
+    enabled: true
+    endpoint: "http://otel-collector:4318/v1/traces"    # OTLP traces endpoint
+  
+  # Logging configuration
+  logging:
+    level: "info"
+    format: "json"
+
+# Environment variable overrides:
+# AIRLOCK_OBSERVABILITY_TRACING_ENABLED=true
+# AIRLOCK_OBSERVABILITY_TRACING_ENDPOINT=http://jaeger:14268/api/traces
+# AIRLOCK_OBSERVABILITY_METRICS_ENABLED=true
+# AIRLOCK_OBSERVABILITY_METRICS_ENDPOINT=http://prometheus:9090/api/v1/write

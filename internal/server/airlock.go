@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ik-labs/mcp-airlock/pkg/observability"
 	"go.uber.org/zap"
 )
 
@@ -46,6 +47,10 @@ type AirlockServer struct {
 	healthChecker HealthChecker
 	alertHandler  AlertHandler
 	eventBuffer   BufferedEventHandler
+
+	// Observability
+	telemetry               *observability.Telemetry
+	observabilityMiddleware *observability.Middleware
 
 	// Graceful shutdown
 	ctx    context.Context
@@ -286,6 +291,16 @@ func (s *AirlockServer) Stop(ctx context.Context) error {
 	// Cancel context to signal shutdown first
 	s.cancel()
 
+	// Shutdown telemetry
+	if s.telemetry != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+
+		if err := s.telemetry.Shutdown(shutdownCtx); err != nil {
+			s.logger.Error("Telemetry shutdown error", zap.Error(err))
+		}
+	}
+
 	// Close client pool
 	if s.clientPool != nil {
 		s.clientPool.Close()
@@ -327,14 +342,28 @@ func (s *AirlockServer) Stop(ctx context.Context) error {
 // handleMCPConnection handles new MCP client connections
 func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Request) {
 	// Generate correlation ID for this connection
-	correlationID := generateCorrelationID()
-	ctx := withCorrelationID(r.Context(), correlationID)
+	correlationID := observability.GenerateCorrelationID()
+
+	// Extract trace context from headers
+	ctx := observability.ExtractTraceContext(r.Context(), r.Header)
+	ctx = observability.WithCorrelationID(ctx, correlationID)
 
 	s.logger.Info("New MCP connection",
 		zap.String("correlation_id", correlationID),
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("user_agent", r.UserAgent()),
 	)
+
+	// Record connection event in observability
+	s.mu.RLock()
+	obsMiddleware := s.observabilityMiddleware
+	s.mu.RUnlock()
+
+	if obsMiddleware != nil {
+		// We'll extract tenant later from auth, for now use "unknown"
+		obsMiddleware.RecordConnectionEvent(ctx, "unknown", "connected")
+		defer obsMiddleware.RecordConnectionEvent(ctx, "unknown", "disconnected")
+	}
 
 	// Update metrics
 	s.metrics.IncrementActiveConnections()
@@ -347,6 +376,12 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 			zap.String("correlation_id", correlationID),
 			zap.Error(err),
 		)
+
+		// Record error in observability
+		if obsMiddleware != nil {
+			obsMiddleware.RecordError(ctx, "connection", "creation_failed", "unknown", err)
+		}
+
 		http.Error(w, "Failed to create connection", http.StatusInternalServerError)
 		return
 	}
@@ -361,6 +396,11 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 
 	if rootMiddleware != nil {
 		conn.SetRootMiddleware(rootMiddleware)
+	}
+
+	// Set observability middleware on connection
+	if obsMiddleware != nil {
+		conn.SetObservabilityMiddleware(obsMiddleware)
 	}
 
 	// Handle the connection (blocks until connection closes)
@@ -408,6 +448,22 @@ func (s *AirlockServer) SetEventBuffer(eventBuffer BufferedEventHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.eventBuffer = eventBuffer
+}
+
+// SetTelemetry sets the telemetry instance for the server
+func (s *AirlockServer) SetTelemetry(telemetry *observability.Telemetry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.telemetry = telemetry
+
+	// Create observability middleware
+	if telemetry != nil {
+		middlewareConfig := &observability.MiddlewareConfig{
+			ServiceName: "mcp-airlock",
+			Enabled:     true,
+		}
+		s.observabilityMiddleware = observability.NewMiddleware(telemetry, s.logger, middlewareConfig)
+	}
 }
 
 // RegisterHealthChecks registers health checks for all components

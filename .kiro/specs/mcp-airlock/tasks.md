@@ -184,7 +184,7 @@
   - _Requirements: R12.1, R12.2, R7.5_
 
 - [ ] 10. Observability and monitoring integration
-- [ ] 10.1 Implement OpenTelemetry tracing and metrics
+- [x] 10.1 Implement OpenTelemetry tracing and metrics
   - Add OTEL tracing with span attributes (tenant, tool, decision, root, latency)
   - Implement structured metrics for performance, security events, and errors
   - Create trace correlation across authentication, policy, and upstream calls
