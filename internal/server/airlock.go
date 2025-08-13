@@ -398,10 +398,9 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 		conn.SetRootMiddleware(rootMiddleware)
 	}
 
-	// Set observability middleware on connection
-	if obsMiddleware != nil {
-		conn.SetObservabilityMiddleware(obsMiddleware)
-	}
+	// Note: Observability middleware is handled at the server level
+	// Individual connection observability will be implemented when
+	// the ClientConnection type supports it
 
 	// Handle the connection (blocks until connection closes)
 	conn.Handle(ctx)

@@ -12,6 +12,8 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+// Use context keys defined in context.go
+
 func TestNewErrorHandler(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	degradationManager := pkgerrors.NewDegradationManager(logger, nil, nil)
@@ -40,7 +42,7 @@ func TestHandleError(t *testing.T) {
 	eh := NewErrorHandler(logger, nil)
 
 	// Create context with correlation ID
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	// Test with HTTP error
 	httpErr := pkgerrors.NewAuthenticationError("invalid token", "test-correlation")
@@ -68,7 +70,7 @@ func TestHandleUpstreamError(t *testing.T) {
 	degradationManager := pkgerrors.NewDegradationManager(logger, nil, nil)
 	eh := NewErrorHandler(logger, degradationManager)
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	// Test retryable error
 	retryableErr := pkgerrors.NewUpstreamFailureError(502, "test-correlation")
@@ -92,7 +94,7 @@ func TestHandleAuditError(t *testing.T) {
 	degradationManager := pkgerrors.NewDegradationManager(logger, nil, nil)
 	eh := NewErrorHandler(logger, degradationManager)
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	event := pkgerrors.AuditEvent{
 		ID:            "test-event",
@@ -136,7 +138,7 @@ func TestRetryUpstreamCall(t *testing.T) {
 		JitterPercent: 0,
 	})
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	// Test successful call after retry
 	attempts := 0
@@ -172,8 +174,8 @@ func TestCreateErrors(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	eh := NewErrorHandler(logger, nil)
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
-	ctx = context.WithValue(ctx, "tenant", "test-tenant")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
+	ctx = context.WithValue(ctx, tenantKey, "test-tenant")
 
 	// Test authentication error
 	authErr := eh.CreateAuthenticationError(ctx, "invalid token")
@@ -210,7 +212,7 @@ func TestValidateMessageSize(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	eh := NewErrorHandler(logger, nil)
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	// Test valid size
 	smallData := make([]byte, 100*1024) // 100KB
@@ -239,7 +241,7 @@ func TestWrapJSONRPCError(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	eh := NewErrorHandler(logger, nil)
 
-	ctx := context.WithValue(context.Background(), "correlation_id", "test-correlation")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "test-correlation")
 
 	// Test with HTTP error
 	httpErr := pkgerrors.NewAuthenticationError("invalid token", "test-correlation")
