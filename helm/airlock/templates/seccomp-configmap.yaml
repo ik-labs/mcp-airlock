@@ -1,0 +1,107 @@
+{{- if .Values.security.seccomp.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "airlock.fullname" . }}-seccomp
+  labels:
+    {{- include "airlock.labels" . | nindent 4 }}
+  annotations:
+    checksum/seccomp: {{ include (print $.Template.BasePath "/seccomp-configmap.yaml") . | sha256sum }}
+data:
+  airlock-seccomp-profile.json: |
+    {
+      "defaultAction": "SCMP_ACT_ERRNO",
+      "architectures": [
+        "SCMP_ARCH_X86_64",
+        "SCMP_ARCH_X86",
+        "SCMP_ARCH_X32"
+      ],
+      "syscalls": [
+        {
+          "names": [
+            "accept",
+            "accept4",
+            "access",
+            "bind",
+            "brk",
+            "clock_gettime",
+            "clone",
+            "close",
+            "connect",
+            "dup",
+            "dup2",
+            "epoll_create1",
+            "epoll_ctl",
+            "epoll_pwait",
+            "execve",
+            "exit",
+            "exit_group",
+            "fcntl",
+            "fstat",
+            "futex",
+            "getcwd",
+            "getdents64",
+            "getpid",
+            "getppid",
+            "getrandom",
+            "getsockname",
+            "getsockopt",
+            "gettid",
+            "gettimeofday",
+            "getuid",
+            "listen",
+            "lseek",
+            "madvise",
+            "mmap",
+            "mprotect",
+            "munmap",
+            "nanosleep",
+            "open",
+            "openat",
+            "pipe2",
+            "poll",
+            "pread64",
+            "pwrite64",
+            "read",
+            "readv",
+            "recv",
+            "recvfrom",
+            "recvmsg",
+            "rt_sigaction",
+            "rt_sigprocmask",
+            "rt_sigreturn",
+            "sched_getaffinity",
+            "sched_yield",
+            "select",
+            "send",
+            "sendmsg",
+            "sendto",
+            "setsockopt",
+            "shutdown",
+            "sigaltstack",
+            "socket",
+            "stat",
+            "tgkill",
+            "uname",
+            "write",
+            "writev"
+          ],
+          "action": "SCMP_ACT_ALLOW"
+        },
+        {
+          "names": [
+            "ptrace",
+            "personality",
+            "chroot",
+            "mount",
+            "umount2",
+            "reboot",
+            "swapon",
+            "swapoff"
+          ],
+          "action": "SCMP_ACT_ERRNO",
+          "comment": "Block dangerous syscalls"
+        }
+      ]
+    }
+{{- end }}
