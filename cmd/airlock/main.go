@@ -86,12 +86,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 		zap.String("version", Version),
 		zap.String("commit", GitCommit),
 		zap.String("build_time", BuildTime),
-		zap.String("config_file", *configFile),
+		zap.String("config_file", configFile),
 	)
 
 	// Load configuration
 	loader := config.NewLoader()
-	cfg, err := loader.LoadFromFile(*configFile)
+	cfg, err := loader.LoadFromFile(configFile)
 	if err != nil {
 		logger.Fatal("Failed to load configuration", zap.Error(err))
 	}
