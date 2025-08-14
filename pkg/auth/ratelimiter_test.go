@@ -105,11 +105,11 @@ func TestRateLimiter_BruteForceProtection(t *testing.T) {
 
 	// Should not be throttled anymore (though may still be rate limited)
 	// The key test is that we don't get an immediate rejection due to brute force throttling
-	allowed, err = rl.Allow(ctx, tokenHash)
+	_, err = rl.Allow(ctx, tokenHash)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	// We don't assert on 'allowed' value since it depends on rate limiting,
+	// We don't assert on the 'allowed' value since it depends on rate limiting,
 	// but the fact that we got here without error means throttling has expired
 }
 

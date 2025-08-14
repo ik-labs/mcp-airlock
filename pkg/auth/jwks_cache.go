@@ -116,7 +116,7 @@ func (jc *JWKSCache) refreshJWKS(ctx context.Context) error {
 }
 
 // fetchJWKS mock implementation
-func (jc *JWKSCache) fetchJWKS(ctx context.Context) (interface{}, error) {
+func (jc *JWKSCache) fetchJWKS(_ context.Context) (interface{}, error) {
 	return map[string]interface{}{"keys": []interface{}{"mock-key"}}, nil
 }
 

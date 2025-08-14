@@ -13,6 +13,7 @@ import (
 )
 
 // addPerformanceCommands adds performance monitoring and optimization commands
+// TODO: This function will be used when we fully migrate to Cobra CLI
 func addPerformanceCommands(rootCmd *cobra.Command) {
 	perfCmd := &cobra.Command{
 		Use:   "perf",

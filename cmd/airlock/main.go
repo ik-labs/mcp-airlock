@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,12 +12,8 @@ import (
 
 	"github.com/ik-labs/mcp-airlock/pkg/config"
 	"github.com/ik-labs/mcp-airlock/pkg/health"
+	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-)
-
-var (
-	configFile = flag.String("config", "config.yaml", "Path to configuration file")
-	version    = flag.Bool("version", false, "Show version information")
 )
 
 // Version information (set by build process)
@@ -28,12 +23,47 @@ var (
 	BuildTime = "unknown"
 )
 
-func main() {
-	flag.Parse()
+var (
+	configFile string
+)
 
-	if *version {
+func main() {
+	rootCmd := &cobra.Command{
+		Use:   "airlock",
+		Short: "MCP Airlock - Secure MCP proxy with authentication and authorization",
+		Long:  "MCP Airlock provides secure access to Model Context Protocol servers with authentication, authorization, and audit logging.",
+		RunE:  runServer,
+	}
+
+	// Add global flags
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "config.yaml", "Path to configuration file")
+	rootCmd.Flags().Bool("version", false, "Show version information")
+
+	// Add version command
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Show version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("MCP Airlock %s (commit: %s, built: %s)\n", Version, GitCommit, BuildTime)
+		},
+	}
+	rootCmd.AddCommand(versionCmd)
+
+	// Add performance commands
+	addPerformanceCommands(rootCmd)
+
+	// Execute the root command
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runServer(cmd *cobra.Command, args []string) error {
+	// Check if version flag was used
+	if versionFlag, _ := cmd.Flags().GetBool("version"); versionFlag {
 		fmt.Printf("MCP Airlock %s (commit: %s, built: %s)\n", Version, GitCommit, BuildTime)
-		os.Exit(0)
+		return nil
 	}
 
 	// Create context for graceful shutdown
@@ -74,7 +104,7 @@ func main() {
 
 	// Initialize health checker
 	healthChecker := health.NewHealthChecker(logger)
-	
+
 	// Register default health checks
 	defaultChecks := health.DefaultChecks(logger)
 	for name, checkFunc := range defaultChecks {
@@ -96,7 +126,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/live", healthChecker.LivenessHandler())
 	mux.HandleFunc("/ready", healthChecker.ReadinessHandler())
-	
+
 	// Add a basic info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -114,7 +144,7 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		logger.Info("Starting HTTP server", zap.String("addr", cfg.Server.Addr))
-		
+
 		if cfg.Server.TLS.CertFile != "" && cfg.Server.TLS.KeyFile != "" {
 			logger.Info("Starting HTTPS server with TLS")
 			if err := server.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
@@ -148,4 +178,5 @@ func main() {
 	}
 
 	logger.Info("MCP Airlock stopped")
+	return nil
 }
