@@ -1,203 +1,88 @@
-# API Documentation
+# MCP Airlock API Documentation
 
-This section contains comprehensive API documentation and integration examples for MCP Airlock.
+This document provides comprehensive API documentation for MCP Airlock, including MCP protocol endpoints, administrative endpoints, and monitoring interfaces.
 
-## Available Documentation
+## Overview
 
-- [MCP Protocol Integration](mcp-protocol.md) - MCP protocol implementation details
-- [Authentication API](authentication.md) - Authentication and token handling
-- [Configuration API](configuration.md) - Configuration management endpoints
-- [Health and Monitoring](health-monitoring.md) - Health checks and metrics
-- [Integration Examples](examples/) - Code examples and integration patterns
+MCP Airlock provides several API interfaces:
 
-## Quick Start
+- **MCP Protocol API**: Standard Model Context Protocol endpoints
+- **Administrative API**: Management and configuration endpoints
+- **Health Check API**: Service health and readiness endpoints
+- **Metrics API**: Prometheus-compatible metrics endpoint
 
-### Basic MCP Client Connection
+## Base URLs
 
-```typescript
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-
-// Create transport with authentication
-const transport = new SSEClientTransport(
-  new URL('https://your-airlock-domain/mcp/v1/sse'),
-  {
-    headers: {
-      'Authorization': `Bearer ${your_jwt_token}`,
-      'Content-Type': 'application/json'
-    }
-  }
-);
-
-// Create MCP client
-const client = new Client(
-  {
-    name: "my-mcp-client",
-    version: "1.0.0"
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {}
-    }
-  }
-);
-
-// Connect and initialize
-await client.connect(transport);
-const result = await client.initialize();
-console.log('Connected to MCP Airlock:', result);
-```
-
-### Authentication Flow
-
-```bash
-# 1. Obtain JWT token from your OIDC provider
-curl -X POST https://your-oidc-provider/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=your-client-id&client_secret=your-secret&scope=mcp.access"
-
-# 2. Use token with MCP Airlock
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-     https://your-airlock-domain/mcp/v1/initialize
-```
-
-## API Endpoints
-
-### MCP Protocol Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/mcp/v1/initialize` | POST | Initialize MCP session |
-| `/mcp/v1/sse` | GET | Server-Sent Events transport |
-| `/mcp/v1/tools/list` | POST | List available tools |
-| `/mcp/v1/tools/call` | POST | Call a specific tool |
-| `/mcp/v1/resources/list` | POST | List available resources |
-| `/mcp/v1/resources/read` | POST | Read a specific resource |
-
-### Health and Monitoring
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health/live` | GET | Liveness probe |
-| `/health/ready` | GET | Readiness probe |
-| `/metrics` | GET | Prometheus metrics |
-
-### Administrative Endpoints
-
-| Endpoint | Method | Description | Auth Required |
-|----------|--------|-------------|---------------|
-| `/admin/reload` | POST | Reload configuration | Admin token |
-| `/admin/policy/validate` | POST | Validate policy | Admin token |
-| `/admin/health` | GET | Detailed health status | Admin token |
-
-## Error Handling
-
-All API responses follow the MCP error format:
-
-```json
-{
-  "error": {
-    "code": "InvalidRequest",
-    "message": "Authentication failed",
-    "data": {
-      "reason": "invalid_token",
-      "www_authenticate": "Bearer realm=\"mcp-airlock\"",
-      "correlation_id": "abc123-def456-ghi789"
-    }
-  }
-}
-```
-
-### Common Error Codes
-
-| HTTP Status | MCP Error Code | Description |
-|-------------|----------------|-------------|
-| 400 | InvalidRequest | Malformed request or invalid parameters |
-| 401 | InvalidRequest | Authentication required or failed |
-| 403 | Forbidden | Authorization denied by policy |
-| 413 | RequestTooLarge | Request exceeds size limits |
-| 429 | TooManyRequests | Rate limit exceeded |
-| 500 | InternalError | Server error (check correlation_id) |
-| 502 | InternalError | Upstream server error |
-| 503 | InternalError | Service temporarily unavailable |
-
-## Rate Limiting
-
-Airlock implements multiple levels of rate limiting:
-
-### Per-Token Limits
-- Default: 200 requests per minute
-- Configurable per tenant/group
-- Sliding window implementation
-
-### Per-IP Limits  
-- Default: 1000 requests per minute
-- Protects against distributed attacks
-- Shared across all tokens from same IP
-
-### Response Headers
-```http
-X-RateLimit-Limit: 200
-X-RateLimit-Remaining: 150
-X-RateLimit-Reset: 1640995200
-X-RateLimit-Retry-After: 30
-```
+- **Production**: `https://airlock.your-company.com`
+- **Staging**: `https://airlock-staging.your-company.com`
+- **Development**: `https://airlock-dev.your-company.com`
 
 ## Authentication
 
-### JWT Token Requirements
+All API endpoints (except health checks) require authentication via JWT Bearer tokens obtained from your organization's OIDC provider.
+
+```http
+Authorization: Bearer <jwt-token>
+```
+
+### Token Requirements
+
+- **Issuer**: Must match configured OIDC issuer
+- **Audience**: Must match configured audience (typically `mcp-airlock`)
+- **Claims**: Must include required claims (`sub`, `tid`, `groups`)
+- **Expiration**: Token must not be expired (with clock skew tolerance)
+
+## MCP Protocol API
+
+### Base Endpoint
+
+```
+POST /mcp
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+### MCP Message Format
+
+All MCP requests follow the JSON-RPC 2.0 specification:
 
 ```json
 {
-  "iss": "https://your-oidc-provider",
-  "aud": "mcp-airlock",
-  "sub": "user@example.com",
-  "tid": "tenant-123",
-  "groups": ["mcp.users", "engineering"],
-  "exp": 1640995200,
-  "iat": 1640991600,
-  "nbf": 1640991600
+  "jsonrpc": "2.0",
+  "id": "unique-request-id",
+  "method": "method-name",
+  "params": {
+    // method-specific parameters
+  }
 }
 ```
 
-### Required Claims
-- `iss` - Token issuer (must match configured OIDC provider)
-- `aud` - Audience (must match configured audience)
-- `sub` - Subject (user identifier)
-- `tid` - Tenant ID (for multi-tenant isolation)
-- `groups` - User groups (for authorization)
-- `exp` - Expiration time
-- `iat` - Issued at time
+### Core MCP Methods
 
-### Optional Claims
-- `nbf` - Not before time
-- `jti` - JWT ID (for token tracking)
-- `scope` - OAuth2 scopes
+#### Initialize Connection
 
-## Request/Response Examples
+Establish an MCP session with capability negotiation.
 
-### Initialize Session
+```http
+POST /mcp
+```
 
 **Request:**
-```http
-POST /mcp/v1/initialize HTTP/1.1
-Host: your-airlock-domain
-Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
+  "id": "init-1",
   "method": "initialize",
   "params": {
     "protocolVersion": "2024-11-05",
     "capabilities": {
-      "tools": {},
-      "resources": {}
+      "roots": {
+        "listChanged": true
+      },
+      "sampling": {}
     },
     "clientInfo": {
-      "name": "my-client",
+      "name": "MyMCPClient",
       "version": "1.0.0"
     }
   }
@@ -205,17 +90,14 @@ Content-Type: application/json
 ```
 
 **Response:**
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-X-Correlation-ID: abc123-def456-ghi789
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
+  "id": "init-1",
   "result": {
     "protocolVersion": "2024-11-05",
     "capabilities": {
+      "logging": {},
       "tools": {
         "listChanged": true
       },
@@ -225,65 +107,68 @@ X-Correlation-ID: abc123-def456-ghi789
       }
     },
     "serverInfo": {
-      "name": "mcp-airlock",
+      "name": "MCP Airlock",
       "version": "1.0.0"
     }
   }
 }
 ```
 
-### List Tools
+#### List Available Tools
+
+Discover tools available to the authenticated user.
+
+```http
+POST /mcp
+```
 
 **Request:**
-```http
-POST /mcp/v1/tools/list HTTP/1.1
-Host: your-airlock-domain
-Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": "tools-list-1",
   "method": "tools/list"
 }
 ```
 
 **Response:**
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": "tools-list-1",
   "result": {
     "tools": [
       {
-        "name": "read_file",
-        "description": "Read contents of a file",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string",
-              "description": "Path to the file to read"
-            }
-          },
-          "required": ["path"]
-        }
-      },
-      {
         "name": "search_docs",
-        "description": "Search documentation",
+        "description": "Search through documentation",
         "inputSchema": {
           "type": "object",
           "properties": {
             "query": {
               "type": "string",
               "description": "Search query"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "Maximum number of results",
+              "default": 10
             }
           },
           "required": ["query"]
+        }
+      },
+      {
+        "name": "read_file",
+        "description": "Read file contents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Virtual file path (e.g., mcp://repo/README.md)"
+            }
+          },
+          "required": ["path"]
         }
       }
     ]
@@ -291,41 +176,40 @@ Content-Type: application/json
 }
 ```
 
-### Call Tool
+#### Call Tool
+
+Execute a specific tool with provided arguments.
+
+```http
+POST /mcp
+```
 
 **Request:**
-```http
-POST /mcp/v1/tools/call HTTP/1.1
-Host: your-airlock-domain
-Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 3,
+  "id": "tool-call-1",
   "method": "tools/call",
   "params": {
-    "name": "read_file",
+    "name": "search_docs",
     "arguments": {
-      "path": "mcp://repo/README.md"
+      "query": "authentication setup",
+      "max_results": 5
     }
   }
 }
 ```
 
 **Response:**
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 3,
+  "id": "tool-call-1",
   "result": {
     "content": [
       {
         "type": "text",
-        "text": "# My Project\n\nThis is a sample README file...\n\nContact: [redacted-email] for more information."
+        "text": "Found 3 documentation entries matching 'authentication setup':\n\n1. Authentication Setup Guide\n   Path: /docs/auth/setup.md\n   Summary: Complete guide for setting up authentication...\n\n2. OIDC Configuration\n   Path: /docs/auth/oidc.md\n   Summary: How to configure OIDC providers...\n\n3. Troubleshooting Authentication\n   Path: /docs/auth/troubleshooting.md\n   Summary: Common authentication issues and solutions..."
       }
     ],
     "isError": false
@@ -333,107 +217,699 @@ Content-Type: application/json
 }
 ```
 
-### Error Response Example
+#### List Resources
+
+Discover available resources.
+
+```http
+POST /mcp
+```
 
 **Request:**
-```http
-POST /mcp/v1/tools/call HTTP/1.1
-Host: your-airlock-domain
-Authorization: Bearer invalid-token
-Content-Type: application/json
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 4,
-  "method": "tools/call",
+  "id": "resources-list-1",
+  "method": "resources/list"
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "resources-list-1",
+  "result": {
+    "resources": [
+      {
+        "uri": "mcp://repo/README.md",
+        "name": "Project README",
+        "description": "Main project documentation",
+        "mimeType": "text/markdown"
+      },
+      {
+        "uri": "mcp://docs/api/authentication.md",
+        "name": "Authentication API Documentation",
+        "description": "API authentication guide",
+        "mimeType": "text/markdown"
+      }
+    ]
+  }
+}
+```
+
+#### Read Resource
+
+Read the contents of a specific resource.
+
+```http
+POST /mcp
+```
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "resource-read-1",
+  "method": "resources/read",
   "params": {
-    "name": "read_file",
-    "arguments": {
-      "path": "/etc/passwd"
-    }
+    "uri": "mcp://repo/README.md"
   }
 }
 ```
 
 **Response:**
-```http
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
-WWW-Authenticate: Bearer realm="mcp-airlock"
-
+```json
 {
   "jsonrpc": "2.0",
-  "id": 4,
+  "id": "resource-read-1",
+  "result": {
+    "contents": [
+      {
+        "uri": "mcp://repo/README.md",
+        "mimeType": "text/markdown",
+        "text": "# Project Name\n\nThis is the main project documentation...\n\n## Getting Started\n\n..."
+      }
+    ]
+  }
+}
+```
+
+### Error Responses
+
+All errors follow the JSON-RPC 2.0 error format:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
   "error": {
-    "code": "InvalidRequest",
-    "message": "Authentication failed",
+    "code": -32603,
+    "message": "Internal error",
     "data": {
-      "reason": "invalid_token",
-      "www_authenticate": "Bearer realm=\"mcp-airlock\"",
-      "correlation_id": "def456-ghi789-jkl012"
+      "correlation_id": "abc123def456",
+      "reason": "detailed_error_reason"
     }
   }
 }
 ```
 
-## Server-Sent Events (SSE)
+#### Standard Error Codes
 
-For real-time communication, Airlock supports SSE transport:
+| Code | Name | Description |
+|------|------|-------------|
+| -32700 | Parse error | Invalid JSON |
+| -32600 | Invalid Request | Invalid JSON-RPC request |
+| -32601 | Method not found | Method does not exist |
+| -32602 | Invalid params | Invalid method parameters |
+| -32603 | Internal error | Internal JSON-RPC error |
+| -32000 | Server error | Server-specific error |
 
-### Connection Setup
+#### Airlock-Specific Error Codes
+
+| Code | Name | Description | HTTP Status |
+|------|------|-------------|-------------|
+| -32600 | Invalid Request | Authentication failed | 401 |
+| -32603 | Forbidden | Policy denied request | 403 |
+| -32000 | Request Too Large | Message size exceeded | 413 |
+| -32000 | Rate Limited | Rate limit exceeded | 429 |
+| -32603 | Internal Error | Server error | 500 |
+| -32000 | Upstream Error | Upstream server error | 502 |
+
+## Administrative API
+
+Administrative endpoints require elevated privileges (typically `mcp.admins` group).
+
+### Base Endpoint
+
+```
+/admin/*
+Authorization: Bearer <admin-token>
+```
+
+### System Information
+
+#### Get System Status
+
+```http
+GET /admin/status
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "build_time": "2024-01-15T10:30:00Z",
+  "uptime": "72h30m15s",
+  "components": {
+    "authentication": "healthy",
+    "policy_engine": "healthy",
+    "audit_system": "healthy",
+    "upstream_servers": "healthy"
+  },
+  "metrics": {
+    "requests_per_minute": 150,
+    "active_connections": 25,
+    "error_rate": 0.02
+  }
+}
+```
+
+#### Get Configuration
+
+```http
+GET /admin/config
+```
+
+**Response:**
+```json
+{
+  "auth": {
+    "oidc_issuer": "https://your-idp.com",
+    "audience": "mcp-airlock",
+    "clock_skew": "2m",
+    "jwks_cache_ttl": "5m"
+  },
+  "policy": {
+    "engine": "opa",
+    "cache_ttl": "1m",
+    "last_reload": "2024-01-15T10:00:00Z"
+  },
+  "rate_limiting": {
+    "per_token": "200/min",
+    "per_ip": "1000/min"
+  }
+}
+```
+
+### Policy Management
+
+#### Reload Policy
+
+```http
+POST /admin/policy/reload
+```
+
+**Request:**
+```json
+{
+  "validate_only": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Policy reloaded successfully",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "validation_result": {
+    "valid": true,
+    "rules_count": 15,
+    "warnings": []
+  }
+}
+```
+
+#### Validate Policy
+
+```http
+POST /admin/policy/validate
+```
+
+**Request:**
+```json
+{
+  "policy": "package airlock.authz\n\ndefault allow := false\n\nallow if {\n    input.groups[_] == \"users\"\n}"
+}
+```
+
+**Response:**
+```json
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    "Rule 'allow' could be more specific"
+  ],
+  "rules_count": 2
+}
+```
+
+### User Management
+
+#### List Active Users
+
+```http
+GET /admin/users/active
+```
+
+**Query Parameters:**
+- `since`: Time period (e.g., "1h", "24h", "7d")
+- `limit`: Maximum number of results (default: 100)
+
+**Response:**
+```json
+{
+  "users": [
+    {
+      "subject": "user@company.com",
+      "tenant": "company-tenant",
+      "groups": ["mcp.users", "developers"],
+      "last_activity": "2024-01-15T10:25:00Z",
+      "request_count": 45,
+      "error_count": 2
+    }
+  ],
+  "total": 1,
+  "period": "24h"
+}
+```
+
+#### Get User Activity
+
+```http
+GET /admin/users/{subject}/activity
+```
+
+**Query Parameters:**
+- `since`: Time period (default: "24h")
+- `include_errors`: Include error events (default: false)
+
+**Response:**
+```json
+{
+  "subject": "user@company.com",
+  "tenant": "company-tenant",
+  "activity": [
+    {
+      "timestamp": "2024-01-15T10:25:00Z",
+      "action": "tool_call",
+      "tool": "search_docs",
+      "decision": "allow",
+      "latency_ms": 45
+    }
+  ],
+  "summary": {
+    "total_requests": 45,
+    "successful_requests": 43,
+    "failed_requests": 2,
+    "avg_latency_ms": 52
+  }
+}
+```
+
+### Audit Management
+
+#### Query Audit Logs
+
+```http
+GET /admin/audit/query
+```
+
+**Query Parameters:**
+- `since`: Start time (ISO 8601 or relative like "1h")
+- `until`: End time (ISO 8601, default: now)
+- `subject`: Filter by user subject
+- `tenant`: Filter by tenant
+- `action`: Filter by action type
+- `decision`: Filter by decision (allow/deny)
+- `limit`: Maximum results (default: 100)
+- `offset`: Pagination offset (default: 0)
+
+**Response:**
+```json
+{
+  "events": [
+    {
+      "id": "audit-123456",
+      "timestamp": "2024-01-15T10:25:00Z",
+      "correlation_id": "req-abc123",
+      "subject": "user@company.com",
+      "tenant": "company-tenant",
+      "action": "tool_call",
+      "decision": "allow",
+      "reason": "policy_allowed",
+      "latency_ms": 45,
+      "redaction_count": 0,
+      "metadata": {
+        "tool": "search_docs",
+        "source_ip": "192.168.1.100"
+      }
+    }
+  ],
+  "total": 1,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+#### Export Audit Logs
+
+```http
+POST /admin/audit/export
+```
+
+**Request:**
+```json
+{
+  "format": "jsonl",
+  "since": "2024-01-01T00:00:00Z",
+  "until": "2024-01-15T23:59:59Z",
+  "filters": {
+    "tenant": "company-tenant",
+    "actions": ["tool_call", "policy_evaluate"]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "export_id": "export-789",
+  "status": "processing",
+  "download_url": "/admin/audit/export/export-789/download",
+  "expires_at": "2024-01-16T10:30:00Z"
+}
+```
+
+### Security Management
+
+#### Block IP Address
+
+```http
+POST /admin/security/block
+```
+
+**Request:**
+```json
+{
+  "ip_addresses": ["192.168.1.100", "10.0.0.50"],
+  "duration": "1h",
+  "reason": "Suspicious activity detected"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "blocked_ips": ["192.168.1.100", "10.0.0.50"],
+  "expires_at": "2024-01-15T11:30:00Z"
+}
+```
+
+#### List Security Violations
+
+```http
+GET /admin/security/violations
+```
+
+**Query Parameters:**
+- `since`: Time period (default: "24h")
+- `severity`: Filter by severity (low/medium/high/critical)
+- `type`: Filter by violation type
+
+**Response:**
+```json
+{
+  "violations": [
+    {
+      "id": "violation-456",
+      "timestamp": "2024-01-15T10:20:00Z",
+      "type": "path_traversal",
+      "severity": "high",
+      "subject": "attacker@evil.com",
+      "source_ip": "192.168.1.100",
+      "details": {
+        "attempted_path": "mcp://repo/../../../etc/passwd",
+        "blocked": true
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+## Health Check API
+
+Health check endpoints are publicly accessible and don't require authentication.
+
+### Liveness Check
+
+```http
+GET /live
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+### Readiness Check
+
+```http
+GET /ready
+```
+
+**Response:**
+```json
+{
+  "status": "ready",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "checks": {
+    "database": "ok",
+    "policy_engine": "ok",
+    "upstream_servers": "ok",
+    "oidc_provider": "ok"
+  }
+}
+```
+
+### Service Information
+
+```http
+GET /info
+```
+
+**Response:**
+```json
+{
+  "name": "MCP Airlock",
+  "version": "1.0.0",
+  "build_time": "2024-01-15T10:00:00Z",
+  "git_commit": "abc123def456",
+  "go_version": "go1.21.5",
+  "uptime": "72h30m15s"
+}
+```
+
+## Metrics API
+
+Prometheus-compatible metrics endpoint.
+
+### Get Metrics
+
+```http
+GET /metrics
+```
+
+**Response:**
+```
+# HELP airlock_requests_total Total number of requests
+# TYPE airlock_requests_total counter
+airlock_requests_total{method="tools/call",status="success"} 1234
+airlock_requests_total{method="tools/call",status="error"} 56
+
+# HELP airlock_request_duration_seconds Request duration in seconds
+# TYPE airlock_request_duration_seconds histogram
+airlock_request_duration_seconds_bucket{method="tools/call",le="0.01"} 100
+airlock_request_duration_seconds_bucket{method="tools/call",le="0.05"} 500
+airlock_request_duration_seconds_bucket{method="tools/call",le="0.1"} 800
+airlock_request_duration_seconds_bucket{method="tools/call",le="+Inf"} 1000
+airlock_request_duration_seconds_sum{method="tools/call"} 45.5
+airlock_request_duration_seconds_count{method="tools/call"} 1000
+
+# HELP airlock_active_connections Current number of active connections
+# TYPE airlock_active_connections gauge
+airlock_active_connections 25
+
+# HELP airlock_policy_evaluations_total Total number of policy evaluations
+# TYPE airlock_policy_evaluations_total counter
+airlock_policy_evaluations_total{decision="allow"} 2000
+airlock_policy_evaluations_total{decision="deny"} 100
+
+# HELP airlock_redaction_events_total Total number of redaction events
+# TYPE airlock_redaction_events_total counter
+airlock_redaction_events_total{pattern="email"} 50
+airlock_redaction_events_total{pattern="ssn"} 25
+```
+
+## Rate Limiting
+
+All API endpoints are subject to rate limiting based on:
+
+- **Per-token limits**: Default 200 requests/minute
+- **Per-IP limits**: Default 1000 requests/minute
+- **Burst allowance**: Configurable burst capacity
+
+### Rate Limit Headers
+
+Rate limit information is included in response headers:
+
+```http
+X-RateLimit-Limit: 200
+X-RateLimit-Remaining: 150
+X-RateLimit-Reset: 1642248600
+X-RateLimit-Retry-After: 60
+```
+
+### Rate Limit Exceeded Response
+
+```http
+HTTP/1.1 429 Too Many Requests
+X-RateLimit-Limit: 200
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1642248600
+X-RateLimit-Retry-After: 60
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "error": {
+    "code": -32000,
+    "message": "Rate limit exceeded",
+    "data": {
+      "retry_after": 60,
+      "limit": 200,
+      "window": "1m"
+    }
+  }
+}
+```
+
+## WebSocket API (Server-Sent Events)
+
+For real-time communication, MCP Airlock supports Server-Sent Events (SSE) over HTTP.
+
+### Establish SSE Connection
+
+```http
+GET /mcp/stream
+Accept: text/event-stream
+Authorization: Bearer <token>
+```
+
+**Response:**
+```
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+
+event: connected
+data: {"status":"connected","session_id":"session-123"}
+
+event: heartbeat
+data: {"timestamp":"2024-01-15T10:30:00Z"}
+
+event: message
+data: {"jsonrpc":"2.0","id":"notification-1","method":"tools/list_changed","params":{"tools":[]}}
+```
+
+### SSE Event Types
+
+- **connected**: Connection established
+- **heartbeat**: Periodic heartbeat (every 30 seconds)
+- **message**: MCP protocol message
+- **error**: Error notification
+- **disconnected**: Connection terminated
+
+## SDK and Client Libraries
+
+### Official SDKs
+
+- **Go**: `github.com/your-org/mcp-airlock-go`
+- **Python**: `pip install mcp-airlock-python`
+- **JavaScript/TypeScript**: `npm install @your-org/mcp-airlock-js`
+
+### Example Usage
+
+#### Go Client
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/your-org/mcp-airlock-go"
+)
+
+func main() {
+    client := airlock.NewClient("https://airlock.your-company.com", "your-jwt-token")
+    
+    tools, err := client.ListTools(context.Background())
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("Available tools: %+v\n", tools)
+}
+```
+
+#### Python Client
+
+```python
+from mcp_airlock import AirlockClient
+
+client = AirlockClient("https://airlock.your-company.com", "your-jwt-token")
+
+tools = client.list_tools()
+print(f"Available tools: {tools}")
+
+result = client.call_tool("search_docs", {"query": "authentication"})
+print(f"Search results: {result}")
+```
+
+#### JavaScript Client
 
 ```javascript
-const eventSource = new EventSource('https://your-airlock-domain/mcp/v1/sse', {
-  headers: {
-    'Authorization': `Bearer ${jwt_token}`
-  }
-});
+import { AirlockClient } from '@your-org/mcp-airlock-js';
 
-eventSource.onmessage = function(event) {
-  const message = JSON.parse(event.data);
-  console.log('Received:', message);
-};
+const client = new AirlockClient('https://airlock.your-company.com', 'your-jwt-token');
 
-eventSource.onerror = function(event) {
-  console.error('SSE error:', event);
-};
+async function main() {
+  const tools = await client.listTools();
+  console.log('Available tools:', tools);
+  
+  const result = await client.callTool('search_docs', { query: 'authentication' });
+  console.log('Search results:', result);
+}
+
+main().catch(console.error);
 ```
 
-### Message Format
-
-All SSE messages follow JSON-RPC 2.0 format:
-
-```
-data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}
-
-data: {"jsonrpc":"2.0","id":1,"result":{"tools":[...]}}
-
-: heartbeat
-
-data: {"jsonrpc":"2.0","id":2,"error":{"code":"Forbidden","message":"Access denied"}}
-```
-
-### Heartbeat
-
-Airlock sends heartbeat comments every 20 seconds to prevent connection timeouts:
-
-```
-: heartbeat
-```
-
-## Integration Patterns
+## Error Handling Best Practices
 
 ### Retry Logic
 
-```typescript
-async function callToolWithRetry(client: Client, toolName: string, args: any, maxRetries = 3) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+Implement exponential backoff for transient errors:
+
+```javascript
+async function callWithRetry(fn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
     try {
-      return await client.callTool({ name: toolName, arguments: args });
+      return await fn();
     } catch (error) {
-      if (error.code === 'TooManyRequests' && attempt < maxRetries) {
-        const retryAfter = error.data?.retry_after || Math.pow(2, attempt);
-        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+      if (error.code === -32000 && error.message.includes('rate limit')) {
+        const delay = Math.pow(2, i) * 1000; // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
       throw error;
@@ -442,210 +918,127 @@ async function callToolWithRetry(client: Client, toolName: string, args: any, ma
 }
 ```
 
-### Connection Management
+### Error Classification
 
-```typescript
-class AirlockClient {
-  private client: Client;
-  private transport: SSEClientTransport;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-
-  async connect(token: string) {
-    this.transport = new SSEClientTransport(
-      new URL('https://your-airlock-domain/mcp/v1/sse'),
-      {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }
-    );
-
-    this.transport.onclose = () => this.handleDisconnect();
-    this.transport.onerror = (error) => this.handleError(error);
-
-    await this.client.connect(this.transport);
-  }
-
-  private async handleDisconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-      
-      setTimeout(() => {
-        this.connect(this.getCurrentToken());
-      }, delay);
-    }
-  }
-}
-```
-
-### Error Handling
-
-```typescript
-function handleAirlockError(error: any) {
-  switch (error.code) {
-    case 'InvalidRequest':
-      if (error.data?.reason === 'invalid_token') {
-        // Refresh token and retry
-        return refreshTokenAndRetry();
-      }
-      break;
-      
-    case 'Forbidden':
-      // Log policy denial for debugging
-      console.error('Access denied:', {
-        reason: error.data?.reason,
-        rule_id: error.data?.rule_id,
-        correlation_id: error.data?.correlation_id
-      });
-      break;
-      
-    case 'RequestTooLarge':
-      // Split request into smaller chunks
-      return splitAndRetry();
-      
-    case 'TooManyRequests':
-      // Implement exponential backoff
-      const retryAfter = error.data?.retry_after || 60;
-      return new Promise(resolve => 
-        setTimeout(resolve, retryAfter * 1000)
-      );
-  }
-  
-  throw error;
-}
-```
-
-## SDK Integration
-
-### Official MCP SDK
-
-```bash
-npm install @modelcontextprotocol/sdk
-```
-
-```typescript
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-
-const client = new Client(
-  { name: "my-app", version: "1.0.0" },
-  { capabilities: { tools: {}, resources: {} } }
-);
-
-const transport = new SSEClientTransport(
-  new URL('https://your-airlock-domain/mcp/v1/sse'),
-  { headers: { 'Authorization': `Bearer ${token}` } }
-);
-
-await client.connect(transport);
-```
-
-### Custom HTTP Client
+Handle different error types appropriately:
 
 ```python
-import requests
-import json
-
-class AirlockClient:
-    def __init__(self, base_url: str, token: str):
-        self.base_url = base_url
-        self.session = requests.Session()
-        self.session.headers.update({
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        })
-    
-    def call_tool(self, name: str, arguments: dict) -> dict:
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": name,
-                "arguments": arguments
-            }
-        }
-        
-        response = self.session.post(
-            f"{self.base_url}/mcp/v1/tools/call",
-            json=payload
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"HTTP {response.status_code}: {response.text}")
-        
-        result = response.json()
-        if "error" in result:
-            raise Exception(f"MCP Error: {result['error']}")
-        
-        return result["result"]
-
-# Usage
-client = AirlockClient("https://your-airlock-domain", "your-jwt-token")
-result = client.call_tool("read_file", {"path": "mcp://repo/README.md"})
+def handle_airlock_error(error):
+    if error.code == -32600:  # Authentication failed
+        # Refresh token and retry
+        refresh_token()
+        return "retry"
+    elif error.code == -32603:  # Policy denied
+        # Log and notify user
+        log_policy_denial(error.data)
+        return "deny"
+    elif error.code == -32000:  # Rate limited
+        # Wait and retry
+        time.sleep(error.data.get('retry_after', 60))
+        return "retry"
+    else:
+        # Unknown error
+        log_error(error)
+        return "fail"
 ```
 
-## Testing and Development
+## Security Considerations
 
-### Local Development Setup
+### Token Security
 
-```bash
-# Start local Airlock instance
-kubectl port-forward -n mcp-airlock svc/mcp-airlock 8080:80
+- Store tokens securely (environment variables, secure storage)
+- Implement automatic token refresh
+- Never log or expose tokens in error messages
+- Use short-lived tokens when possible
 
-# Test with curl
-curl -H "Authorization: Bearer $DEV_TOKEN" \
-     http://localhost:8080/health/ready
+### Request Security
 
-# Test MCP initialization
-curl -H "Authorization: Bearer $DEV_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}' \
-     http://localhost:8080/mcp/v1/initialize
-```
+- Validate all inputs before sending requests
+- Implement request signing for sensitive operations
+- Use HTTPS for all communications
+- Implement proper timeout handling
 
-### Mock Server for Testing
+### Data Handling
 
-```typescript
-// Mock Airlock server for testing
-import express from 'express';
+- Be aware that requests may be logged and audited
+- Sensitive data is automatically redacted by Airlock
+- Implement client-side data classification
+- Follow data retention policies
 
-const app = express();
-app.use(express.json());
+## Troubleshooting
 
-app.post('/mcp/v1/initialize', (req, res) => {
-  res.json({
-    jsonrpc: "2.0",
-    id: req.body.id,
-    result: {
-      protocolVersion: "2024-11-05",
-      capabilities: { tools: {}, resources: {} },
-      serverInfo: { name: "mock-airlock", version: "1.0.0" }
+### Common Issues
+
+#### Authentication Failures
+
+```json
+{
+  "error": {
+    "code": -32600,
+    "message": "Authentication failed",
+    "data": {
+      "reason": "invalid_token",
+      "correlation_id": "abc123"
     }
-  });
-});
-
-app.post('/mcp/v1/tools/list', (req, res) => {
-  res.json({
-    jsonrpc: "2.0",
-    id: req.body.id,
-    result: {
-      tools: [
-        {
-          name: "echo",
-          description: "Echo input",
-          inputSchema: {
-            type: "object",
-            properties: { text: { type: "string" } },
-            required: ["text"]
-          }
-        }
-      ]
-    }
-  });
-});
-
-app.listen(3000, () => console.log('Mock Airlock running on port 3000'));
+  }
+}
 ```
 
-This API documentation provides comprehensive guidance for integrating with MCP Airlock, including authentication, error handling, and best practices for reliable client implementations.
+**Solutions:**
+- Check token format and expiration
+- Verify OIDC configuration
+- Ensure required claims are present
+
+#### Policy Denials
+
+```json
+{
+  "error": {
+    "code": -32603,
+    "message": "Policy denied request",
+    "data": {
+      "reason": "insufficient_permissions",
+      "rule_id": "rule-123",
+      "correlation_id": "def456"
+    }
+  }
+}
+```
+
+**Solutions:**
+- Check user group memberships
+- Review policy rules
+- Contact administrator for access
+
+#### Rate Limiting
+
+```json
+{
+  "error": {
+    "code": -32000,
+    "message": "Rate limit exceeded",
+    "data": {
+      "retry_after": 60
+    }
+  }
+}
+```
+
+**Solutions:**
+- Implement exponential backoff
+- Reduce request frequency
+- Consider request batching
+
+### Debug Mode
+
+Enable debug mode for detailed error information:
+
+```http
+X-Debug: true
+```
+
+This will include additional debugging information in error responses (not recommended for production).
+
+---
+
+For additional support and examples, see the [Developer Onboarding Guide](../onboarding/developer-onboarding.md) and [Troubleshooting Guide](../operations/troubleshooting.md).

@@ -1,511 +1,905 @@
-# Troubleshooting Runbook
+# Troubleshooting Guide
 
-This runbook covers common operational issues and their solutions for MCP Airlock.
+This guide provides solutions for common issues encountered with MCP Airlock, organized by category with step-by-step resolution procedures.
 
 ## Quick Diagnosis
 
-### 1. Check Overall Health
+### Health Check Commands
+
 ```bash
-# Pod status
-kubectl get pods -n mcp-airlock
+# Basic connectivity
+curl -f https://airlock.your-company.com/live
+curl -f https://airlock.your-company.com/ready
 
 # Service status
-kubectl get svc -n mcp-airlock
+kubectl get pods -n airlock-system -l app.kubernetes.io/name=airlock
+kubectl get svc -n airlock-system -l app.kubernetes.io/name=airlock
 
-# Ingress status
-kubectl get ingress -n mcp-airlock
+# Recent logs
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock --tail=100
 
-# Recent events
-kubectl get events -n mcp-airlock --sort-by='.lastTimestamp'
+# Resource usage
+kubectl top pods -n airlock-system
 ```
 
-### 2. Check Application Health
+### Common Error Patterns
+
+| Error Pattern | Likely Cause | Quick Fix |
+|---------------|--------------|-----------|
+| `connection refused` | Service not running | Check pod status |
+| `401 Unauthorized` | Authentication issue | Verify token |
+| `403 Forbidden` | Policy denial | Check permissions |
+| `429 Too Many Requests` | Rate limiting | Implement backoff |
+| `500 Internal Server Error` | System error | Check logs |
+| `timeout` | Performance issue | Check resources |
+
+## Authentication Issues
+
+### JWT Token Validation Failures
+
+#### Symptoms
+- HTTP 401 responses
+- "Invalid token" errors
+- Authentication logs showing validation failures
+
+#### Diagnosis
 ```bash
-# Health endpoints
-curl https://your-airlock-domain/health/live
-curl https://your-airlock-domain/health/ready
+# Check token format and claims
+echo $JWT_TOKEN | cut -d. -f2 | base64 -d | jq .
 
-# Metrics endpoint
-curl https://your-airlock-domain/metrics
-```
+# Verify token expiration
+TOKEN_EXP=$(echo $JWT_TOKEN | cut -d. -f2 | base64 -d | jq -r .exp)
+CURRENT_TIME=$(date +%s)
+echo "Token expires: $(date -d @$TOKEN_EXP)"
+echo "Current time: $(date -d @$CURRENT_TIME)"
 
-## Common Issues
-
-### Authentication Issues
-
-#### Symptom: 401 Unauthorized responses
-```json
-{
-  "error": {
-    "code": "InvalidRequest",
-    "message": "Authentication failed",
-    "data": {
-      "reason": "invalid_token",
-      "www_authenticate": "Bearer realm=\"mcp-airlock\"",
-      "correlation_id": "abc123"
-    }
-  }
-}
-```
-
-**Diagnosis:**
-```bash
 # Check OIDC configuration
-kubectl get secret airlock-oidc -n mcp-airlock -o yaml
+curl -s https://your-idp.com/.well-known/openid-configuration | jq .
 
-# Check JWKS cache status in logs
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | grep "jwks"
-
-# Test OIDC endpoint connectivity
-kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-  curl -v https://your-oidc-provider/.well-known/openid-configuration
+# Verify JWKS endpoint
+curl -s https://your-idp.com/.well-known/jwks.json | jq .
 ```
 
-**Solutions:**
-1. **Invalid OIDC configuration:**
-   ```bash
-   # Update OIDC secret
-   kubectl create secret generic airlock-oidc \
-     --namespace mcp-airlock \
-     --from-literal=issuer="https://correct-issuer.com" \
-     --dry-run=client -o yaml | kubectl apply -f -
-   
-   # Restart pods
-   kubectl rollout restart deployment/mcp-airlock -n mcp-airlock
-   ```
+#### Solutions
 
-2. **JWKS fetch failure:**
-   ```bash
-   # Check network connectivity
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-     nslookup your-oidc-provider.com
-   
-   # Force JWKS refresh
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-     kill -USR1 1
-   ```
-
-3. **Clock skew issues:**
-   ```bash
-   # Check pod time
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- date
-   
-   # Compare with OIDC provider time
-   curl -I https://your-oidc-provider.com
-   ```
-
-#### Symptom: Token validation errors
+**Expired Token**
 ```bash
-# Check token claims
-echo "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..." | base64 -d | jq .
+# Refresh token using OIDC flow
+kubelogin get-token \
+  --oidc-issuer-url=https://your-idp.com \
+  --oidc-client-id=your-client-id \
+  --oidc-extra-scope=groups
 
-# Verify token hasn't expired
-date -d @$(echo "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..." | base64 -d | jq -r .exp)
+# Update environment variable
+export AIRLOCK_TOKEN="new-token-here"
 ```
 
-### Policy Issues
+**Invalid Issuer/Audience**
+```bash
+# Check Airlock configuration
+kubectl get configmap airlock-config -n airlock-system -o yaml
 
-#### Symptom: 403 Forbidden responses
-```json
+# Verify issuer matches IdP
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i "oidc\|issuer"
+
+# Update configuration if needed
+kubectl patch configmap airlock-config -n airlock-system --patch '
+data:
+  config.yaml: |
+    auth:
+      oidc:
+        issuer: "https://correct-idp.com"
+        audience: "correct-client-id"
+'
+```
+
+**JWKS Fetch Failures**
+```bash
+# Check network connectivity from pods
+kubectl exec -n airlock-system deployment/airlock -- \
+  curl -s https://your-idp.com/.well-known/jwks.json
+
+# Check DNS resolution
+kubectl exec -n airlock-system deployment/airlock -- \
+  nslookup your-idp.com
+
+# Verify firewall/network policies
+kubectl get networkpolicy -n airlock-system
+```
+
+### OIDC Configuration Issues
+
+#### Symptoms
+- "OIDC discovery failed" errors
+- "Unable to fetch JWKS" messages
+- Inconsistent authentication behavior
+
+#### Diagnosis
+```bash
+# Test OIDC endpoints manually
+curl -v https://your-idp.com/.well-known/openid-configuration
+curl -v https://your-idp.com/.well-known/jwks.json
+
+# Check Airlock OIDC configuration
+kubectl describe configmap airlock-config -n airlock-system
+
+# Review authentication logs
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i oidc
+```
+
+#### Solutions
+
+**Update OIDC Configuration**
+```yaml
+# config.yaml
+auth:
+  oidc:
+    issuer: "https://your-idp.com"  # Must match IdP exactly
+    audience: "your-client-id"      # Must match registered client
+    clockSkew: "2m"                 # Allow for time differences
+    jwksCacheTTL: "5m"             # Cache JWKS for performance
+    requiredGroups: ["mcp.users"]  # Enforce group membership
+```
+
+**Network Connectivity Issues**
+```bash
+# Add network policy for OIDC access
+kubectl apply -f - << EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: airlock-oidc-access
+  namespace: airlock-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+  policyTypes:
+  - Egress
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+EOF
+```
+
+## Authorization and Policy Issues
+
+### Policy Evaluation Failures
+
+#### Symptoms
+- HTTP 403 responses with policy denial messages
+- "Policy engine unavailable" errors
+- Inconsistent access decisions
+
+#### Diagnosis
+```bash
+# Check policy engine status
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i policy
+
+# Verify policy configuration
+kubectl get configmap airlock-policy -n airlock-system -o yaml
+
+# Test policy locally
+opa eval -d policy.rego "data.airlock.authz.allow" --input test-input.json
+
+# Check policy compilation
+opa fmt policy.rego
+opa test policy.rego policy_test.rego
+```
+
+#### Solutions
+
+**Policy Compilation Errors**
+```bash
+# Validate policy syntax
+opa fmt policy.rego
+
+# Fix common syntax issues
+# 1. Missing import statements
+# 2. Incorrect rule syntax
+# 3. Undefined variables
+
+# Test policy with sample input
+cat > test-input.json << EOF
 {
-  "error": {
-    "code": "Forbidden",
-    "message": "Policy denied request",
-    "data": {
-      "reason": "tool 'read_file' not allowed",
-      "rule_id": "airlock.authz.allowed_tool",
-      "tenant": "tenant-123",
-      "correlation_id": "def456"
-    }
-  }
+  "subject": "user@company.com",
+  "tenant": "test-tenant",
+  "groups": ["mcp.users"],
+  "tool": "read_file",
+  "resource": "mcp://repo/README.md",
+  "method": "GET"
+}
+EOF
+
+opa eval -d policy.rego "data.airlock.authz.allow" --input test-input.json
+```
+
+**Policy Hot-Reload Issues**
+```bash
+# Trigger policy reload
+kubectl exec -n airlock-system deployment/airlock -- kill -HUP 1
+
+# Or use admin endpoint
+curl -X POST https://airlock.your-company.com/admin/policy/reload \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Verify reload success
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i "policy.*reload"
+```
+
+**Last-Known-Good Fallback**
+```bash
+# Check if LKG is active
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i "last.*known.*good"
+
+# Force policy update
+kubectl create configmap airlock-policy-new \
+  --from-file=policy.rego=fixed-policy.rego \
+  -n airlock-system
+
+kubectl patch deployment airlock -n airlock-system --patch '
+spec:
+  template:
+    spec:
+      containers:
+      - name: airlock
+        env:
+        - name: POLICY_CONFIGMAP
+          value: "airlock-policy-new"
+'
+```
+
+### Permission Denied Errors
+
+#### Symptoms
+- Users getting 403 errors for allowed operations
+- Inconsistent access patterns
+- Group membership not recognized
+
+#### Diagnosis
+```bash
+# Check user token claims
+echo $USER_TOKEN | cut -d. -f2 | base64 -d | jq .
+
+# Verify group membership
+echo $USER_TOKEN | cut -d. -f2 | base64 -d | jq .groups
+
+# Test policy decision manually
+cat > user-input.json << EOF
+{
+  "subject": "$(echo $USER_TOKEN | cut -d. -f2 | base64 -d | jq -r .sub)",
+  "tenant": "$(echo $USER_TOKEN | cut -d. -f2 | base64 -d | jq -r .tid)",
+  "groups": $(echo $USER_TOKEN | cut -d. -f2 | base64 -d | jq .groups),
+  "tool": "read_file",
+  "resource": "mcp://repo/README.md"
+}
+EOF
+
+opa eval -d policy.rego "data.airlock.authz.allow" --input user-input.json
+```
+
+#### Solutions
+
+**Update Group Mappings**
+```rego
+# policy.rego - Add missing group mappings
+allowed_tool contains tool if {
+    tool := input.tool
+    tool in ["read_file", "search_docs"]
+    input.groups[_] == "developers"  # Add missing group
 }
 ```
 
-**Diagnosis:**
+**Fix IdP Group Claims**
 ```bash
-# Check current policy
-kubectl get configmap airlock-policy -n mcp-airlock -o yaml
+# In your IdP (Okta example):
+# 1. Go to Applications > Your App > Sign On
+# 2. Edit OIDC Settings
+# 3. Add groups claim to ID token
+# 4. Ensure groups are included in token
 
-# Check policy compilation logs
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | grep "policy"
-
-# Test policy evaluation
-kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-  opa eval -d /etc/policy/policy.rego "data.airlock.authz.allow" \
-  --input '{"sub":"user@example.com","groups":["mcp.users"],"tool":"read_file"}'
+# Verify groups in token
+curl -X POST https://airlock.your-company.com/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"debug","method":"debug/token"}' | jq .
 ```
 
-**Solutions:**
-1. **Policy compilation error:**
-   ```bash
-   # Validate policy syntax
-   opa fmt configs/policy.rego
-   opa test configs/policy.rego
-   
-   # Update policy ConfigMap
-   kubectl create configmap airlock-policy \
-     --from-file=policy.rego=configs/policy.rego \
-     --namespace mcp-airlock \
-     --dry-run=client -o yaml | kubectl apply -f -
-   
-   # Reload policy
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- kill -HUP 1
-   ```
+## Performance Issues
 
-2. **User missing required groups:**
-   ```bash
-   # Check user's JWT claims
-   echo $JWT_TOKEN | jwt decode -
-   
-   # Update policy to include user's groups
-   # Or update user's groups in OIDC provider
-   ```
+### High Response Times
 
-### Upstream Connection Issues
+#### Symptoms
+- Requests taking > 1 second
+- Timeouts on normal operations
+- Users reporting slow performance
 
-#### Symptom: 502 Bad Gateway responses
-```json
-{
-  "error": {
-    "code": "InternalError",
-    "message": "Upstream server error",
-    "data": {
-      "upstream_status": "connection_refused",
-      "correlation_id": "ghi789"
-    }
-  }
-}
-```
-
-**Diagnosis:**
+#### Diagnosis
 ```bash
-# Check upstream configuration
-kubectl get configmap airlock-config -n mcp-airlock -o yaml | grep -A 10 upstreams
-
-# Check if upstream services are running
-kubectl get pods -n mcp-airlock -l app=mcp-server
-
-# Test upstream connectivity
-kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-  nc -zv mcp-server-service 8080
-```
-
-**Solutions:**
-1. **Upstream service down:**
-   ```bash
-   # Check upstream pod logs
-   kubectl logs -n mcp-airlock -l app=mcp-server
-   
-   # Restart upstream service
-   kubectl rollout restart deployment/mcp-server -n mcp-airlock
-   ```
-
-2. **Network connectivity issues:**
-   ```bash
-   # Check network policies
-   kubectl get networkpolicy -n mcp-airlock
-   
-   # Test DNS resolution
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-     nslookup mcp-server-service.mcp-airlock.svc.cluster.local
-   ```
-
-### Performance Issues
-
-#### Symptom: High latency (p95 > 100ms)
-**Diagnosis:**
-```bash
-# Check metrics
-curl https://your-airlock-domain/metrics | grep airlock_request_duration
-
 # Check resource usage
-kubectl top pods -n mcp-airlock
+kubectl top pods -n airlock-system
 
-# Check for CPU throttling
-kubectl describe pods -n mcp-airlock | grep -A 5 -B 5 throttl
+# Review performance metrics
+curl -s https://airlock.your-company.com/metrics | grep -E "(duration|latency)"
+
+# Check for resource constraints
+kubectl describe pod -n airlock-system -l app.kubernetes.io/name=airlock | grep -A 5 -B 5 -i limit
+
+# Analyze request patterns
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -E "(duration|latency)" | tail -20
 ```
 
-**Solutions:**
-1. **Resource constraints:**
-   ```bash
-   # Increase resource limits
-   kubectl patch deployment mcp-airlock -n mcp-airlock -p '
-   {
-     "spec": {
-       "template": {
-         "spec": {
-           "containers": [{
-             "name": "airlock",
-             "resources": {
-               "limits": {"cpu": "1000m", "memory": "1Gi"},
-               "requests": {"cpu": "500m", "memory": "512Mi"}
-             }
-           }]
-         }
-       }
-     }
-   }'
-   ```
+#### Solutions
 
-2. **Scale horizontally:**
-   ```bash
-   # Increase replica count
-   kubectl scale deployment mcp-airlock -n mcp-airlock --replicas=5
-   
-   # Enable HPA if not already enabled
-   kubectl autoscale deployment mcp-airlock -n mcp-airlock \
-     --cpu-percent=70 --min=3 --max=10
-   ```
+**Increase Resource Limits**
+```yaml
+# values.yaml
+resources:
+  limits:
+    cpu: "2000m"      # Increase from 1000m
+    memory: "1Gi"     # Increase from 512Mi
+  requests:
+    cpu: "500m"
+    memory: "256Mi"
+```
 
-#### Symptom: High memory usage
-**Diagnosis:**
+**Optimize Policy Evaluation**
+```rego
+# Optimize policy rules for performance
+package airlock.authz
+
+import rego.v1
+
+# Use indexed lookups instead of iterations
+allowed_tools := {
+    "mcp.users": ["read_file", "search_docs"],
+    "developers": ["read_file", "write_file", "analyze_code"]
+}
+
+allow if {
+    user_tools := allowed_tools[input.groups[_]]
+    input.tool in user_tools
+}
+```
+
+**Enable Caching**
+```yaml
+# config.yaml
+policy:
+  cacheTTL: "5m"        # Cache policy decisions
+  cacheSize: 10000      # Increase cache size
+
+auth:
+  jwksCacheTTL: "10m"   # Cache JWKS longer
+```
+
+### Memory Issues
+
+#### Symptoms
+- Pods being OOMKilled
+- High memory usage in metrics
+- Performance degradation over time
+
+#### Diagnosis
 ```bash
-# Check memory metrics
-kubectl top pods -n mcp-airlock
+# Check memory usage trends
+kubectl top pods -n airlock-system --containers
 
-# Check for memory leaks in logs
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | grep -i "memory\|oom"
+# Look for memory limit hits
+kubectl get events -n airlock-system | grep -i memory
 
-# Get heap profile
-kubectl port-forward -n mcp-airlock deployment/mcp-airlock 6060:6060
-curl http://localhost:6060/debug/pprof/heap > heap.prof
+# Check for memory leaks
+kubectl exec -n airlock-system deployment/airlock -- \
+  curl -s localhost:6060/debug/pprof/heap > heap.prof
+
+# Analyze with go tool pprof
 go tool pprof heap.prof
 ```
 
-### Audit System Issues
+#### Solutions
 
-#### Symptom: Audit storage failures
-```bash
-# Check audit logs
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | grep "audit"
-
-# Check database connectivity
-kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-  pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER
+**Increase Memory Limits**
+```yaml
+resources:
+  limits:
+    memory: "2Gi"     # Increase limit
+  requests:
+    memory: "512Mi"   # Increase request
 ```
 
-**Solutions:**
-1. **Database connection issues:**
-   ```bash
-   # Check database secret
-   kubectl get secret airlock-database -n mcp-airlock -o yaml
-   
-   # Test database connection
-   kubectl run -it --rm debug --image=postgres:13 --restart=Never -- \
-     psql $DATABASE_URL -c "SELECT 1;"
-   ```
+**Optimize Memory Usage**
+```yaml
+# config.yaml
+audit:
+  bufferSize: 1000    # Reduce buffer size
+  flushInterval: "30s" # Flush more frequently
 
-2. **Disk space issues (SQLite):**
-   ```bash
-   # Check PVC usage
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- df -h /var/lib/airlock
-   
-   # Clean up old audit logs
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-     find /var/lib/airlock -name "*.db-wal" -mtime +7 -delete
-   ```
+policy:
+  cacheSize: 5000     # Reduce cache size if needed
+```
+
+**Enable Memory Profiling**
+```yaml
+# Enable pprof endpoint for debugging
+server:
+  debug:
+    enabled: true
+    port: 6060
+```
+
+## Connectivity Issues
+
+### Upstream Server Connection Failures
+
+#### Symptoms
+- "Connection refused" to upstream servers
+- Timeouts when calling MCP tools
+- Intermittent connectivity issues
+
+#### Diagnosis
+```bash
+# Check upstream server status
+kubectl get pods -n airlock-system -l app=upstream-server
+
+# Test connectivity from Airlock pod
+kubectl exec -n airlock-system deployment/airlock -- \
+  nc -zv upstream-server 8080
+
+# Check service discovery
+kubectl get svc -n airlock-system
+kubectl get endpoints -n airlock-system
+
+# Review upstream configuration
+kubectl get configmap airlock-config -n airlock-system -o yaml | grep -A 10 upstreams
+```
+
+#### Solutions
+
+**Fix Service Configuration**
+```yaml
+# Correct upstream configuration
+upstreams:
+  - name: "docs-server"
+    type: "http"
+    url: "http://docs-server.airlock-system.svc.cluster.local:8080"
+    timeout: "30s"
+    healthCheck:
+      enabled: true
+      path: "/health"
+      interval: "30s"
+```
+
+**Network Policy Issues**
+```bash
+# Allow traffic to upstream services
+kubectl apply -f - << EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: airlock-upstream-access
+  namespace: airlock-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: upstream-server
+    ports:
+    - protocol: TCP
+      port: 8080
+EOF
+```
 
 ### TLS/Certificate Issues
 
-#### Symptom: TLS handshake failures
-**Diagnosis:**
+#### Symptoms
+- "Certificate verification failed" errors
+- TLS handshake failures
+- Browser certificate warnings
+
+#### Diagnosis
 ```bash
 # Check certificate validity
-openssl s_client -connect your-airlock-domain:443 -servername your-airlock-domain
+openssl s_client -connect airlock.your-company.com:443 -servername airlock.your-company.com
+
+# Verify certificate chain
+curl -vI https://airlock.your-company.com/live
 
 # Check certificate in Kubernetes
-kubectl get secret airlock-tls -n mcp-airlock -o yaml | \
-  grep tls.crt | awk '{print $2}' | base64 -d | \
-  openssl x509 -text -noout
+kubectl get secret airlock-tls -n airlock-system -o yaml
+
+# Decode certificate
+kubectl get secret airlock-tls -n airlock-system -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
 ```
 
-**Solutions:**
-1. **Certificate expired:**
+#### Solutions
+
+**Update Certificate**
+```bash
+# Create new certificate secret
+kubectl create secret tls airlock-tls-new \
+  --cert=new-cert.pem \
+  --key=new-key.pem \
+  -n airlock-system
+
+# Update ingress to use new certificate
+kubectl patch ingress airlock -n airlock-system --patch '
+spec:
+  tls:
+  - hosts:
+    - airlock.your-company.com
+    secretName: airlock-tls-new
+'
+```
+
+**Certificate Auto-Renewal**
+```yaml
+# cert-manager Certificate resource
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: airlock-tls
+  namespace: airlock-system
+spec:
+  secretName: airlock-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - airlock.your-company.com
+```
+
+## Data and Storage Issues
+
+### Audit Log Storage Problems
+
+#### Symptoms
+- "Audit storage unavailable" errors
+- Missing audit entries
+- Disk space warnings
+
+#### Diagnosis
+```bash
+# Check PVC status
+kubectl get pvc -n airlock-system
+
+# Check disk usage
+kubectl exec -n airlock-system deployment/airlock -- df -h /var/lib/airlock
+
+# Review audit configuration
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i audit
+
+# Check SQLite database
+kubectl exec -n airlock-system deployment/airlock -- \
+  sqlite3 /var/lib/airlock/audit.db ".schema"
+```
+
+#### Solutions
+
+**Expand Storage**
+```bash
+# Increase PVC size
+kubectl patch pvc airlock-audit -n airlock-system --patch '
+spec:
+  resources:
+    requests:
+      storage: 20Gi
+'
+```
+
+**Configure Retention**
+```yaml
+# config.yaml
+audit:
+  retention: "7d"       # Reduce retention period
+  cleanup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily cleanup at 2 AM
+```
+
+**Enable S3 Export**
+```yaml
+audit:
+  export:
+    enabled: true
+    format: "jsonl"
+    destination: "s3://audit-bucket/airlock/"
+    schedule: "0 1 * * *"  # Daily export at 1 AM
+```
+
+### Virtual Root Access Issues
+
+#### Symptoms
+- "Path not found" errors
+- Permission denied on file access
+- Path traversal security violations
+
+#### Diagnosis
+```bash
+# Check root mappings
+kubectl get configmap airlock-config -n airlock-system -o yaml | grep -A 20 roots
+
+# Test path resolution
+kubectl exec -n airlock-system deployment/airlock -- \
+  ls -la /mnt/repo
+
+# Check mount points
+kubectl exec -n airlock-system deployment/airlock -- mount | grep /mnt
+
+# Review security violations
+kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock | grep -i "path.*traversal"
+```
+
+#### Solutions
+
+**Fix Mount Configuration**
+```yaml
+# Correct volume mounts in deployment
+volumeMounts:
+- name: repo-volume
+  mountPath: /mnt/repo
+  readOnly: true
+- name: workspace-volume
+  mountPath: /mnt/workspace
+  readOnly: false
+
+volumes:
+- name: repo-volume
+  persistentVolumeClaim:
+    claimName: repo-pvc
+- name: workspace-volume
+  persistentVolumeClaim:
+    claimName: workspace-pvc
+```
+
+**Update Root Mappings**
+```yaml
+# config.yaml
+roots:
+  - name: "repository"
+    type: "fs"
+    virtual: "mcp://repo/"
+    real: "/mnt/repo"
+    readOnly: true
+    pathSandboxing: true
+```
+
+## Monitoring and Alerting Issues
+
+### Missing Metrics
+
+#### Symptoms
+- Grafana dashboards showing no data
+- Prometheus not scraping metrics
+- Missing alerts
+
+#### Diagnosis
+```bash
+# Check metrics endpoint
+curl -s https://airlock.your-company.com/metrics
+
+# Verify ServiceMonitor
+kubectl get servicemonitor -n airlock-system
+
+# Check Prometheus targets
+curl -s http://prometheus:9090/api/v1/targets | jq '.data.activeTargets[] | select(.labels.job=="airlock")'
+
+# Review Prometheus configuration
+kubectl get prometheus -o yaml
+```
+
+#### Solutions
+
+**Fix ServiceMonitor**
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: airlock
+  namespace: airlock-system
+  labels:
+    app.kubernetes.io/name: airlock
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airlock
+  endpoints:
+  - port: http-metrics
+    interval: 30s
+    path: /metrics
+```
+
+**Update Prometheus Config**
+```yaml
+# Ensure namespace is monitored
+spec:
+  serviceMonitorNamespaceSelector:
+    matchLabels:
+      name: airlock-system
+```
+
+### Alert Fatigue
+
+#### Symptoms
+- Too many alerts firing
+- Important alerts being ignored
+- Alert storms during incidents
+
+#### Solutions
+
+**Tune Alert Thresholds**
+```yaml
+# Adjust alert sensitivity
+- alert: AirlockHighErrorRate
+  expr: rate(airlock_requests_failed_total[5m]) > 0.05  # Increase threshold
+  for: 5m  # Increase duration
+
+- alert: AirlockHighLatency
+  expr: histogram_quantile(0.95, airlock_request_duration_seconds_bucket) > 0.1  # Increase threshold
+  for: 2m
+```
+
+**Implement Alert Grouping**
+```yaml
+# alertmanager.yml
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+```
+
+## Emergency Procedures
+
+### Service Outage Response
+
+#### Immediate Actions
+1. **Assess Impact**
    ```bash
-   # Renew certificate (example with cert-manager)
-   kubectl delete certificaterequest -n mcp-airlock --all
-   kubectl annotate certificate airlock-tls -n mcp-airlock \
-     cert-manager.io/issue-temporary-certificate-
+   # Check service status
+   kubectl get pods -n airlock-system
+   curl -f https://airlock.your-company.com/live
    ```
 
-2. **Certificate mismatch:**
-   ```bash
-   # Update certificate with correct SAN
-   # This depends on your certificate provider
-   ```
-
-## Escalation Procedures
-
-### Severity Levels
-
-**P0 - Critical (Service Down)**
-- Complete service outage
-- Security breach
-- Data loss
-
-**Actions:**
-1. Page on-call engineer immediately
-2. Create incident in PagerDuty
-3. Notify security team if security-related
-4. Begin incident response procedures
-
-**P1 - High (Degraded Service)**
-- High error rates (>5%)
-- High latency (p95 >200ms)
-- Authentication issues affecting multiple users
-
-**Actions:**
-1. Create incident ticket
-2. Notify on-call engineer
-3. Begin troubleshooting
-4. Update status page
-
-**P2 - Medium (Minor Issues)**
-- Individual user issues
-- Non-critical feature failures
-- Performance degradation <5% users
-
-**Actions:**
-1. Create support ticket
-2. Investigate during business hours
-3. Document in knowledge base
-
-### Emergency Procedures
-
-#### Complete Service Outage
-1. **Immediate Response (0-5 minutes):**
-   ```bash
-   # Check basic infrastructure
-   kubectl get nodes
-   kubectl get pods -n mcp-airlock
-   kubectl get events -n mcp-airlock --sort-by='.lastTimestamp'
-   ```
-
-2. **Quick Recovery Attempts (5-15 minutes):**
-   ```bash
-   # Restart deployment
-   kubectl rollout restart deployment/mcp-airlock -n mcp-airlock
-   
-   # Scale up if resource constrained
-   kubectl scale deployment mcp-airlock -n mcp-airlock --replicas=5
-   
-   # Check ingress
-   kubectl get ingress -n mcp-airlock
-   ```
-
-3. **Detailed Investigation (15+ minutes):**
+2. **Gather Information**
    ```bash
    # Collect logs
-   kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock --previous
+   kubectl logs -n airlock-system -l app.kubernetes.io/name=airlock --previous > airlock-logs.txt
+   
+   # Get events
+   kubectl get events -n airlock-system --sort-by='.lastTimestamp' > events.txt
    
    # Check resource usage
-   kubectl top nodes
-   kubectl top pods -n mcp-airlock
-   
-   # Check external dependencies
-   curl -v https://your-oidc-provider/.well-known/openid-configuration
+   kubectl top pods -n airlock-system > resource-usage.txt
    ```
 
-#### Security Incident
-1. **Immediate Actions:**
-   - Isolate affected systems
-   - Preserve logs and evidence
-   - Notify security team
-   - Document timeline
-
-2. **Investigation:**
+3. **Implement Workarounds**
    ```bash
-   # Check audit logs for suspicious activity
-   kubectl exec -n mcp-airlock deployment/mcp-airlock -- \
-     sqlite3 /var/lib/airlock/audit.db \
-     "SELECT * FROM audit_events WHERE timestamp > datetime('now', '-1 hour') ORDER BY timestamp DESC;"
+   # Scale up replicas
+   kubectl scale deployment airlock -n airlock-system --replicas=3
    
-   # Check authentication failures
-   kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | \
-     grep "authentication_failed" | tail -100
+   # Restart pods
+   kubectl rollout restart deployment/airlock -n airlock-system
    ```
 
-3. **Recovery:**
-   - Apply security patches
-   - Rotate credentials
-   - Update policies
-   - Monitor for continued threats
+### Rollback Procedures
 
-## Monitoring and Alerting
-
-### Key Metrics to Monitor
-
-1. **Request Rate and Errors:**
-   - `airlock_requests_total`
-   - `airlock_request_duration_seconds`
-   - `airlock_errors_total`
-
-2. **Authentication:**
-   - `airlock_auth_attempts_total`
-   - `airlock_auth_success_total`
-   - `airlock_auth_failures_total`
-
-3. **Policy Decisions:**
-   - `airlock_policy_decisions_total`
-   - `airlock_policy_evaluation_duration_seconds`
-
-4. **System Health:**
-   - `airlock_upstream_connections`
-   - `airlock_audit_events_total`
-   - `airlock_memory_usage_bytes`
-
-### Alert Thresholds
-
-```yaml
-# High error rate
-rate(airlock_errors_total[5m]) > 0.05
-
-# High latency
-histogram_quantile(0.95, rate(airlock_request_duration_seconds_bucket[5m])) > 0.1
-
-# Authentication failures
-rate(airlock_auth_failures_total[5m]) > 0.1
-
-# Audit system failures
-increase(airlock_audit_errors_total[5m]) > 0
-
-# Memory usage
-airlock_memory_usage_bytes / airlock_memory_limit_bytes > 0.9
-```
-
-## Log Analysis
-
-### Log Formats
-All logs are structured JSON with these common fields:
-```json
-{
-  "timestamp": "2024-01-15T10:30:00Z",
-  "level": "info",
-  "msg": "request processed",
-  "correlation_id": "abc123",
-  "tenant": "tenant-1",
-  "user": "user@example.com",
-  "tool": "read_file",
-  "decision": "allow",
-  "latency_ms": 45
-}
-```
-
-### Useful Log Queries
+#### Helm Rollback
 ```bash
-# Find all requests for a specific user
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | \
-  jq 'select(.user == "user@example.com")'
+# List releases
+helm list -n airlock-system
 
-# Find all policy denials
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | \
-  jq 'select(.decision == "deny")'
+# Check rollback history
+helm history airlock -n airlock-system
 
-# Find high-latency requests
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | \
-  jq 'select(.latency_ms > 100)'
+# Rollback to previous version
+helm rollback airlock -n airlock-system
 
-# Trace a specific request
-kubectl logs -n mcp-airlock -l app.kubernetes.io/name=airlock | \
-  jq 'select(.correlation_id == "abc123")'
+# Verify rollback
+kubectl get pods -n airlock-system -l app.kubernetes.io/name=airlock
 ```
+
+#### Configuration Rollback
+```bash
+# Restore previous configuration
+kubectl apply -f backup-config.yaml -n airlock-system
+
+# Restart to pick up changes
+kubectl rollout restart deployment/airlock -n airlock-system
+```
+
+### Data Recovery
+
+#### Audit Log Recovery
+```bash
+# Restore from backup
+kubectl exec -n airlock-system deployment/airlock -- \
+  sqlite3 /var/lib/airlock/audit.db ".restore /backup/audit-backup.db"
+
+# Verify integrity
+kubectl exec -n airlock-system deployment/airlock -- \
+  sqlite3 /var/lib/airlock/audit.db "PRAGMA integrity_check;"
+```
+
+## Prevention and Best Practices
+
+### Monitoring Best Practices
+
+1. **Set Up Comprehensive Monitoring**
+   - Monitor all key metrics (latency, errors, throughput)
+   - Set up alerts for critical conditions
+   - Use dashboards for operational visibility
+
+2. **Implement Health Checks**
+   - Configure liveness and readiness probes
+   - Monitor dependency health
+   - Set up synthetic monitoring
+
+3. **Log Management**
+   - Centralize log collection
+   - Set up log retention policies
+   - Implement log analysis and alerting
+
+### Operational Best Practices
+
+1. **Regular Maintenance**
+   - Update security patches monthly
+   - Review and update policies quarterly
+   - Conduct disaster recovery tests annually
+
+2. **Change Management**
+   - Use staging environments for testing
+   - Implement gradual rollouts
+   - Maintain rollback procedures
+
+3. **Documentation**
+   - Keep runbooks up to date
+   - Document all procedures
+   - Maintain incident post-mortems
+
+### Security Best Practices
+
+1. **Access Control**
+   - Use least privilege principles
+   - Regularly review permissions
+   - Implement multi-factor authentication
+
+2. **Network Security**
+   - Use network policies
+   - Implement TLS everywhere
+   - Regular security assessments
+
+3. **Data Protection**
+   - Encrypt data at rest and in transit
+   - Implement proper backup procedures
+   - Regular compliance audits
+
+## Getting Additional Help
+
+### Internal Resources
+- **Documentation**: Check the complete documentation set
+- **Logs**: Always include relevant logs when reporting issues
+- **Metrics**: Use monitoring dashboards for diagnosis
+
+### External Resources
+- **Kubernetes Documentation**: For cluster-related issues
+- **Helm Documentation**: For deployment issues
+- **OPA Documentation**: For policy-related issues
+
+### Escalation Procedures
+1. **Level 1**: Check this troubleshooting guide
+2. **Level 2**: Contact your system administrator
+3. **Level 3**: Engage vendor support with detailed information
+
+---
+
+**Remember**: When in doubt, check the logs first. Most issues can be diagnosed from the application logs combined with Kubernetes events and metrics.
