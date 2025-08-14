@@ -17,6 +17,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.30
 	github.com/modelcontextprotocol/go-sdk v0.2.0
 	github.com/open-policy-agent/opa v1.7.1
+	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/zeebo/blake3 v0.2.4
 	go.uber.org/zap v1.27.0
@@ -28,6 +29,8 @@ require (
 require (
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/spf13/pflag v1.0.7 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.37.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.7.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250603155806-513f23925822 // indirect
