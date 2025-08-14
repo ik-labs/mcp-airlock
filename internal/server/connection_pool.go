@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConnectionPool provides high-performance connection pooling with resource reuse
-type ConnectionPool struct {
+// UpstreamConnectionPool provides high-performance connection pooling with resource reuse
+type UpstreamConnectionPool struct {
 	logger *zap.Logger
 
 	// Pool configuration
@@ -50,11 +50,11 @@ type PooledConnection struct {
 	mu        sync.RWMutex
 }
 
-// NewConnectionPool creates a new high-performance connection pool
-func NewConnectionPool(logger *zap.Logger, maxConnections int) *ConnectionPool {
+// NewUpstreamConnectionPool creates a new high-performance connection pool
+func NewUpstreamConnectionPool(logger *zap.Logger, maxConnections int) *UpstreamConnectionPool {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pool := &ConnectionPool{
+	pool := &UpstreamConnectionPool{
 		logger:            logger,
 		maxConnections:    maxConnections,
 		maxIdleTime:       5 * time.Minute,
@@ -82,7 +82,7 @@ func NewConnectionPool(logger *zap.Logger, maxConnections int) *ConnectionPool {
 }
 
 // GetConnection gets or creates a connection for the upstream
-func (cp *ConnectionPool) GetConnection(ctx context.Context, upstreamName string, config *UpstreamConfig) (*PooledConnection, error) {
+func (cp *UpstreamConnectionPool) GetConnection(ctx context.Context, upstreamName string, config *UpstreamConfig) (*PooledConnection, error) {
 	atomic.AddInt64(&cp.connectionRequests, 1)
 
 	// Try to get existing connection
@@ -114,7 +114,7 @@ func (cp *ConnectionPool) GetConnection(ctx context.Context, upstreamName string
 }
 
 // createConnection creates a new connection
-func (cp *ConnectionPool) createConnection(ctx context.Context, upstreamName string, config *UpstreamConfig) (*PooledConnection, error) {
+func (cp *UpstreamConnectionPool) createConnection(ctx context.Context, upstreamName string, config *UpstreamConfig) (*PooledConnection, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 
@@ -176,7 +176,7 @@ func (cp *ConnectionPool) createConnection(ctx context.Context, upstreamName str
 }
 
 // ReleaseConnection returns a connection to the pool
-func (cp *ConnectionPool) ReleaseConnection(upstreamName string) {
+func (cp *UpstreamConnectionPool) ReleaseConnection(upstreamName string) {
 	cp.mu.RLock()
 	conn, exists := cp.connections[upstreamName]
 	cp.mu.RUnlock()
@@ -192,7 +192,7 @@ func (cp *ConnectionPool) ReleaseConnection(upstreamName string) {
 }
 
 // RemoveConnection removes a connection from the pool
-func (cp *ConnectionPool) RemoveConnection(upstreamName string) {
+func (cp *UpstreamConnectionPool) RemoveConnection(upstreamName string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 
@@ -209,19 +209,19 @@ func (cp *ConnectionPool) RemoveConnection(upstreamName string) {
 }
 
 // GetBuffer gets a buffer from the pool for efficient I/O
-func (cp *ConnectionPool) GetBuffer() []byte {
+func (cp *UpstreamConnectionPool) GetBuffer() []byte {
 	return cp.bufferPool.Get().([]byte)
 }
 
 // PutBuffer returns a buffer to the pool
-func (cp *ConnectionPool) PutBuffer(buf []byte) {
+func (cp *UpstreamConnectionPool) PutBuffer(buf []byte) {
 	// Reset buffer length but keep capacity
 	buf = buf[:0]
 	cp.bufferPool.Put(buf) //nolint:SA6002 // buf is a slice, this is correct
 }
 
 // GetStats returns pool statistics
-func (cp *ConnectionPool) GetStats() map[string]interface{} {
+func (cp *UpstreamConnectionPool) GetStats() map[string]interface{} {
 	cp.mu.RLock()
 	poolSize := len(cp.connections)
 
@@ -254,7 +254,7 @@ func (cp *ConnectionPool) GetStats() map[string]interface{} {
 }
 
 // backgroundCleanup runs periodic cleanup of stale connections
-func (cp *ConnectionPool) backgroundCleanup() {
+func (cp *UpstreamConnectionPool) backgroundCleanup() {
 	defer cp.wg.Done()
 
 	ticker := time.NewTicker(1 * time.Minute)
@@ -275,7 +275,7 @@ func (cp *ConnectionPool) backgroundCleanup() {
 }
 
 // cleanupStaleConnections removes stale and disconnected connections
-func (cp *ConnectionPool) cleanupStaleConnections() {
+func (cp *UpstreamConnectionPool) cleanupStaleConnections() {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 
@@ -309,7 +309,7 @@ func (cp *ConnectionPool) cleanupStaleConnections() {
 }
 
 // Close closes the connection pool and all connections
-func (cp *ConnectionPool) Close() {
+func (cp *UpstreamConnectionPool) Close() {
 	cp.logger.Info("Closing connection pool")
 
 	// Cancel background cleanup
@@ -331,7 +331,7 @@ func (cp *ConnectionPool) Close() {
 }
 
 // HealthCheck performs a health check on the connection pool
-func (cp *ConnectionPool) HealthCheck(ctx context.Context) (string, string) {
+func (cp *UpstreamConnectionPool) HealthCheck(ctx context.Context) (string, string) {
 	stats := cp.GetStats()
 
 	poolSize := stats["pool_size"].(int)

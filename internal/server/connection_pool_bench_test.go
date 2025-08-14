@@ -174,7 +174,7 @@ func BenchmarkConnectionReuse(b *testing.B) {
 	// No config needed for mock implementation
 
 	// Create initial connection
-	conn, ok := pool.GetConnection("reuse-test")
+	_, ok := pool.GetConnection("reuse-test")
 	if !ok {
 		b.Fatal("failed to get connection")
 	}
