@@ -1,0 +1,12 @@
+{
+  "test_name": "PolicyEvaluationPerformance",
+  "timestamp": "2025-08-14T10:27:47.425395+05:30",
+  "auth_latency": 0,
+  "policy_latency": 675,
+  "redact_latency": 0,
+  "total_latency": 675,
+  "memory_usage": 2048,
+  "allocations_per_op": 6,
+  "throughput": 1480859.739777403,
+  "version": "dev"
+}

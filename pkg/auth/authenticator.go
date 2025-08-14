@@ -37,7 +37,9 @@ type Authenticator struct {
 	verifier *oidc.IDTokenVerifier
 	logger   *zap.Logger
 
-	// JWKS cache fields would go here when implemented
+	// High-performance caching
+	tokenCache *TokenCache
+	jwksCache  *JWKSCache
 
 	// Background refresh control
 	refreshCtx    context.Context
@@ -72,24 +74,42 @@ func NewAuthenticator(ctx context.Context, config Config, logger *zap.Logger) (*
 
 	refreshCtx, refreshCancel := context.WithCancel(context.Background())
 
+	// Initialize high-performance caches
+	tokenCache := NewTokenCache(config.JWKSCacheTTL / 2) // Token cache TTL is half of JWKS TTL
+	jwksCache := NewJWKSCache(provider, config.JWKSCacheTTL, logger)
+
 	auth := &Authenticator{
 		config:        config,
 		provider:      provider,
 		verifier:      verifier,
 		logger:        logger,
+		tokenCache:    tokenCache,
+		jwksCache:     jwksCache,
 		refreshCtx:    refreshCtx,
 		refreshCancel: refreshCancel,
 		refreshDone:   make(chan struct{}),
 	}
 
-	// Start background refresh goroutine
-	go auth.startJWKSRefresh()
+	// Start JWKS cache
+	if err := jwksCache.Start(); err != nil {
+		refreshCancel()
+		return nil, fmt.Errorf("failed to start JWKS cache: %w", err)
+	}
+
+	// Start background refresh goroutine for cleanup
+	go auth.startBackgroundTasks()
 
 	return auth, nil
 }
 
-// ValidateToken validates a JWT token and extracts claims
+// ValidateToken validates a JWT token and extracts claims with high-performance caching
 func (a *Authenticator) ValidateToken(ctx context.Context, tokenString string) (*Claims, error) {
+	// Use high-performance cache with singleflight protection
+	return a.tokenCache.GetOrValidate(ctx, tokenString, a.validateTokenUncached)
+}
+
+// validateTokenUncached performs the actual token validation without caching
+func (a *Authenticator) validateTokenUncached(ctx context.Context, tokenString string) (*Claims, error) {
 	// Use OIDC verifier for initial validation
 	idToken, err := a.verifier.Verify(ctx, tokenString)
 	if err != nil {
@@ -120,20 +140,24 @@ func (a *Authenticator) ValidateToken(ctx context.Context, tokenString string) (
 	return claims, nil
 }
 
-// startJWKSRefresh runs the background JWKS refresh goroutine
-func (a *Authenticator) startJWKSRefresh() {
+// startBackgroundTasks runs background maintenance tasks
+func (a *Authenticator) startBackgroundTasks() {
 	defer close(a.refreshDone)
 
-	ticker := time.NewTicker(a.config.JWKSCacheTTL)
-	defer ticker.Stop()
+	// Cleanup ticker for token cache
+	cleanupTicker := time.NewTicker(a.config.JWKSCacheTTL)
+	defer cleanupTicker.Stop()
+
+	a.logger.Info("Background tasks started")
 
 	for {
 		select {
-		case <-ticker.C:
-			a.logger.Info("JWKS refresh tick - would refresh in production")
+		case <-cleanupTicker.C:
+			// Cleanup expired token cache entries
+			a.tokenCache.Cleanup()
 
 		case <-a.refreshCtx.Done():
-			a.logger.Info("JWKS refresh goroutine stopping")
+			a.logger.Info("Background tasks stopping")
 			return
 		}
 	}
@@ -255,38 +279,49 @@ func (a *Authenticator) HealthCheck(ctx context.Context) (string, string) {
 		return "unhealthy", "JWT verifier not initialized"
 	}
 
-	// Try to fetch JWKS to verify connectivity
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	// Create a test provider to check OIDC endpoint connectivity
-	_, err := oidc.NewProvider(checkCtx, a.config.OIDCIssuer)
-	if err != nil {
-		return "unhealthy", fmt.Sprintf("JWKS fetch failed: %v", err)
+	// Check JWKS cache health
+	jwksStatus, jwksMessage := a.jwksCache.HealthCheck(ctx)
+	if jwksStatus != "healthy" {
+		return "unhealthy", fmt.Sprintf("JWKS cache unhealthy: %s", jwksMessage)
 	}
 
-	// Check if background refresh is running
+	// Check if background tasks are running
 	select {
 	case <-a.refreshDone:
-		return "unhealthy", "JWKS refresh goroutine stopped unexpectedly"
+		return "unhealthy", "Background tasks stopped unexpectedly"
 	default:
-		// Goroutine is still running
+		// Background tasks are still running
 	}
 
-	return "healthy", "JWKS fetch successful, background refresh active"
+	// Get cache statistics for health message
+	tokenStats := a.tokenCache.Stats()
+
+	return "healthy", fmt.Sprintf("All systems healthy - Token cache: %d entries, JWKS: %s",
+		tokenStats["total_entries"], jwksMessage)
 }
 
 // Close stops the background refresh goroutine and cleans up resources
 func (a *Authenticator) Close() error {
 	a.refreshCancel()
 
+	// Stop JWKS cache
+	a.jwksCache.Stop()
+
 	// Wait for background goroutine to finish with timeout
 	select {
 	case <-a.refreshDone:
 		a.logger.Info("Authenticator closed successfully")
 	case <-time.After(5 * time.Second):
-		a.logger.Warn("Timeout waiting for JWKS refresh goroutine to stop")
+		a.logger.Warn("Timeout waiting for background tasks to stop")
 	}
 
 	return nil
+}
+
+// GetStats returns performance statistics for the authenticator
+func (a *Authenticator) GetStats() map[string]interface{} {
+	return map[string]interface{}{
+		"token_cache": a.tokenCache.Stats(),
+		"jwks_cache":  a.jwksCache.GetStats(),
+	}
 }
