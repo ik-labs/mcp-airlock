@@ -28,7 +28,7 @@ func TestProductionDeploymentValidation(t *testing.T) {
 		t.Skip("Skipping production validation - set PRODUCTION_VALIDATION=true to run")
 	}
 
-	logger := zaptest.NewLogger(t)
+	zaptest.NewLogger(t)
 
 	// Get deployment configuration
 	config := getDeploymentConfig(t)

@@ -23,6 +23,13 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+// Define custom context key type to avoid collisions
+type contextKey string
+
+const (
+	correlationIDKey contextKey = "correlation_id"
+)
+
 // ComprehensiveIntegrationTest tests all security controls working together
 func TestComprehensiveSecurityIntegration(t *testing.T) {
 	if testing.Short() {
@@ -77,11 +84,18 @@ func TestComprehensiveSecurityIntegration(t *testing.T) {
 	})
 }
 
+// AuditLogger interface for audit logging implementations
+type AuditLogger interface {
+	LogEvent(event *AuditEvent)
+	GetEvents() []*AuditEvent
+	Reset()
+}
+
 // TestEnvironment encapsulates the test setup
 type TestEnvironment struct {
 	Server       *httptest.Server
 	JWTKey       *rsa.PrivateKey
-	AuditLogger  *MockAuditLogger
+	AuditLogger  AuditLogger
 	PolicyEngine *MockPolicyEngine
 	Redactor     *MockRedactor
 	TempDir      string
@@ -749,7 +763,7 @@ func (m *MockRedactor) Redact(ctx context.Context, data []byte) ([]byte, int, er
 	return redacted, m.redactionCount, nil
 }
 
-func createTestServer(t *testing.T, logger *zap.Logger, jwtKey *rsa.PrivateKey, auditLogger *MockAuditLogger, policyEngine *MockPolicyEngine, redactor *MockRedactor, tempDir string) *httptest.Server {
+func createTestServer(_ *testing.T, _ *zap.Logger, jwtKey *rsa.PrivateKey, auditLogger AuditLogger, policyEngine *MockPolicyEngine, redactor *MockRedactor, _ string) *httptest.Server {
 	// Create JWKS for token validation
 	publicKey := &jwtKey.PublicKey
 
@@ -760,7 +774,7 @@ func createTestServer(t *testing.T, logger *zap.Logger, jwtKey *rsa.PrivateKey, 
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		correlationID := fmt.Sprintf("test-%d", time.Now().UnixNano())
-		ctx = context.WithValue(ctx, "correlation_id", correlationID)
+		ctx = context.WithValue(ctx, correlationIDKey, correlationID)
 
 		// Authentication
 		authHeader := r.Header.Get("Authorization")
@@ -921,7 +935,7 @@ func createTestServer(t *testing.T, logger *zap.Logger, jwtKey *rsa.PrivateKey, 
 		}
 
 		// Data redaction
-		redactedBody, redactionCount, err := redactor.Redact(ctx, body)
+		_, redactionCount, err := redactor.Redact(ctx, body)
 		if err == nil && redactionCount > 0 {
 			auditLogger.LogEvent(&AuditEvent{
 				ID:             fmt.Sprintf("audit-%d", time.Now().UnixNano()),

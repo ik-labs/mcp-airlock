@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +75,7 @@ func TestEndToEndIntegration(t *testing.T) {
 	})
 }
 
-func testHealthChecks(t *testing.T, ctx context.Context, airlockURL string) {
+func testHealthChecks(t *testing.T, _ context.Context, airlockURL string) {
 	// Test liveness endpoint
 	resp, err := http.Get(airlockURL + "/live")
 	require.NoError(t, err)
@@ -653,22 +651,22 @@ func TestKubernetesDeployment(t *testing.T) {
 }
 
 // getProjectRoot returns the project root directory
-func getProjectRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
+// func getProjectRoot() (string, error) {
+// 	wd, err := os.Getwd()
+// 	if err != nil {
+// 		return "", err
+// 	}
 
-	// Walk up the directory tree to find go.mod
-	for {
-		if _, err := os.Stat(filepath.Join(wd, "go.mod")); err == nil {
-			return wd, nil
-		}
+// 	// Walk up the directory tree to find go.mod
+// 	for {
+// 		if _, err := os.Stat(filepath.Join(wd, "go.mod")); err == nil {
+// 			return wd, nil
+// 		}
 
-		parent := filepath.Dir(wd)
-		if parent == wd {
-			return "", fmt.Errorf("could not find project root (go.mod not found)")
-		}
-		wd = parent
-	}
-}
+// 		parent := filepath.Dir(wd)
+// 		if parent == wd {
+// 			return "", fmt.Errorf("could not find project root (go.mod not found)")
+// 		}
+// 		wd = parent
+// 	}
+// }

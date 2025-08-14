@@ -15,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
 )
 
 // TestSecurityPenetrationTesting performs security penetration tests
@@ -29,7 +28,6 @@ func TestSecurityPenetrationTesting(t *testing.T) {
 		t.Skip("Skipping penetration testing - set SECURITY_TESTING=true to run")
 	}
 
-	logger := zaptest.NewLogger(t)
 	config := getPenetrationTestConfig(t)
 
 	t.Run("AuthenticationBypassAttempts", func(t *testing.T) {
@@ -765,7 +763,7 @@ func testHeaderInjectionAttacks(t *testing.T, config *PenetrationTestConfig) {
 				assert.True(t, resp.StatusCode < 500, "Header injection should not cause server error")
 
 				// Check that injected headers are not reflected
-				for respHeaderName, respHeaderValues := range resp.Header {
+				for _, respHeaderValues := range resp.Header {
 					for _, respHeaderValue := range respHeaderValues {
 						assert.NotContains(t, respHeaderValue, "X-Admin",
 							"Injected headers should not be reflected")
@@ -1034,21 +1032,41 @@ func testBusinessLogicFlaws(t *testing.T, config *PenetrationTestConfig) {
 
 	// Test 3: Parameter pollution
 	t.Run("ParameterPollution", func(t *testing.T) {
-		// Test duplicate parameters
-		request := createMCPRequest("test-param-pollution", "tools/call", map[string]interface{}{
-			"name": "test_tool",
-			"arguments": map[string]interface{}{
-				"param1": "value1",
-				"param1": "value2", // Duplicate key (will be overwritten in Go)
-			},
-		})
+		// Test duplicate parameters by constructing JSON manually
+		// This simulates parameter pollution that might occur in HTTP forms or URL parameters
+		pollutionPayload := `{
+			"jsonrpc": "2.0",
+			"id": "test-param-pollution",
+			"method": "tools/call",
+			"params": {
+				"name": "test_tool",
+				"arguments": {
+					"param1": "value1",
+					"param1": "value2"
+				}
+			}
+		}`
 
-		resp, err := makeRequest(client, config.TargetURL+"/mcp", request, "Bearer "+config.ValidToken)
+		req, err := http.NewRequest("POST", config.TargetURL+"/mcp", strings.NewReader(pollutionPayload))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+config.ValidToken)
+
+		resp, err := client.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
 		// Should handle parameter pollution gracefully
 		assert.True(t, resp.StatusCode < 500, "Parameter pollution should not cause server error")
+
+		// The JSON parser will typically use the last value for duplicate keys
+		if resp.StatusCode == http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			bodyStr := string(body)
+			// Should not cause any unexpected behavior
+			assert.NotContains(t, bodyStr, "panic", "Should not cause panic")
+			assert.NotContains(t, bodyStr, "fatal", "Should not cause fatal error")
+		}
 	})
 }
 
