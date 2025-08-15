@@ -27,7 +27,12 @@ func TestSQLiteAuditLogger_CleanupExpiredEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	ctx := context.Background()
 
@@ -150,7 +155,12 @@ func TestSQLiteAuditLogger_CreateTombstone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	ctx := context.Background()
 	targetSubject := "user-to-erase@example.com"
@@ -273,7 +283,12 @@ func TestSQLiteAuditLogger_TombstonePreservesChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	ctx := context.Background()
 	targetSubject := "chain-test@example.com"
@@ -355,7 +370,12 @@ func TestSQLiteAuditLogger_RetentionPreservesTombstones(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	ctx := context.Background()
 
@@ -448,7 +468,12 @@ func TestSQLiteAuditLogger_ExportWithTombstones(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+			
+		}
+	}(logger)
 
 	ctx := context.Background()
 

@@ -42,7 +42,10 @@ func (m *mockHealthChecker) LivenessHandler() http.HandlerFunc {
 			"status":    "healthy",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -83,7 +86,10 @@ func (m *mockHealthChecker) ReadinessHandler() http.HandlerFunc {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			return
+		}
 	}
 }
 

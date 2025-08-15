@@ -19,7 +19,12 @@ server:
   addr: ":9090"
 `
 	tmpFile := createTempFile(t, configContent)
-	defer os.Remove(tmpFile)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+
+		}
+	}(tmpFile)
 
 	loader := config.NewLoader()
 	initialConfig := &config.Config{
@@ -54,7 +59,12 @@ server:
   invalid: [
 `
 	tmpFile := createTempFile(t, configContent)
-	defer os.Remove(tmpFile)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+
+		}
+	}(tmpFile)
 
 	loader := config.NewLoader()
 	initialConfig := &config.Config{
@@ -141,7 +151,12 @@ server:
   addr: ":8080"
 `
 	tmpFile := createTempFile(t, configContent)
-	defer os.Remove(tmpFile)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+
+		}
+	}(tmpFile)
 
 	loader := config.NewLoader()
 	initialConfig := &config.Config{
@@ -175,7 +190,12 @@ server:
   addr: ":9090"
 `
 	tmpFile := createTempFile(t, configContent)
-	defer os.Remove(tmpFile)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+
+		}
+	}(tmpFile)
 
 	loader := config.NewLoader()
 	initialConfig := &config.Config{
@@ -224,7 +244,12 @@ server:
   invalid: [
 `
 	tmpFile := createTempFile(t, configContent)
-	defer os.Remove(tmpFile)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			
+		}
+	}(tmpFile)
 
 	loader := config.NewLoader()
 	initialConfig := &config.Config{

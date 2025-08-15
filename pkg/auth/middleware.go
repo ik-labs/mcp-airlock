@@ -232,8 +232,10 @@ func (m *Middleware) writeAuthError(w http.ResponseWriter, reason, correlationID
 		"id": nil,
 	}
 
-	// Write JSON response (ignore encoding errors in middleware)
-	_ = writeJSON(w, errorResponse)
+	// Write JSON response
+	if err := writeJSON(w, errorResponse); err != nil {
+		m.logger.Error("Failed to write authentication error response", zap.Error(err))
+	}
 }
 
 // GetClaimsFromContext extracts JWT claims from the request context

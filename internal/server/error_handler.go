@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -45,11 +46,9 @@ func (eh *ErrorHandler) HandleError(ctx context.Context, err error, w http.Respo
 
 	// Convert to HTTP error if not already
 	var httpErr *pkgerrors.HTTPError
-	if he, ok := err.(*pkgerrors.HTTPError); ok {
+	var he *pkgerrors.HTTPError
+	if errors.As(err, &he) {
 		httpErr = he
-	} else {
-		// Create internal error for unknown errors
-		httpErr = pkgerrors.NewInternalError(errorCtx.CorrelationID)
 	}
 
 	// Write HTTP response
@@ -205,11 +204,9 @@ func (eh *ErrorHandler) ValidateMessageSize(ctx context.Context, data []byte, ma
 // WrapJSONRPCError wraps an error in a JSON-RPC error response
 func (eh *ErrorHandler) WrapJSONRPCError(ctx context.Context, err error, requestID any) []byte {
 	var httpErr *pkgerrors.HTTPError
-	if he, ok := err.(*pkgerrors.HTTPError); ok {
+	var he *pkgerrors.HTTPError
+	if errors.As(err, &he) {
 		httpErr = he
-	} else {
-		errorCtx := pkgerrors.NewErrorContext(ctx)
-		httpErr = pkgerrors.NewInternalError(errorCtx.CorrelationID)
 	}
 
 	response := httpErr.ToJSONRPCResponse(requestID)

@@ -24,16 +24,16 @@ func NewReloadHandler(reloadManager *config.ReloadManager) *ReloadHandler {
 func (h *ReloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-		h.handleReload(w, r)
+		h.handleReload(w)
 	case http.MethodGet:
-		h.handleStatus(w, r)
+		h.handleStatus(w)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
 // handleReload triggers a configuration reload
-func (h *ReloadHandler) handleReload(w http.ResponseWriter, r *http.Request) {
+func (h *ReloadHandler) handleReload(w http.ResponseWriter) {
 	// TODO: Add proper authorization check here
 	// For now, we'll implement basic authorization in a later task
 
@@ -47,11 +47,14 @@ func (h *ReloadHandler) handleReload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 
-	json.NewEncoder(w).Encode(result)
+	err := json.NewEncoder(w).Encode(result)
+	if err != nil {
+		return
+	}
 }
 
 // handleStatus returns the current reload status and statistics
-func (h *ReloadHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
+func (h *ReloadHandler) handleStatus(w http.ResponseWriter) {
 	stats := h.reloadManager.GetStats()
 	currentConfig := h.reloadManager.GetCurrentConfig()
 
@@ -67,7 +70,10 @@ func (h *ReloadHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	err := json.NewEncoder(w).Encode(response)
+	if err != nil {
+		return
+	}
 }
 
 // ConfigDiffHandler handles configuration diff requests
@@ -110,5 +116,8 @@ func (h *ConfigDiffHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		return
+	}
 }

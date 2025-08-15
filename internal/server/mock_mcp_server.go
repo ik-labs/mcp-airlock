@@ -191,7 +191,12 @@ if __name__ == "__main__":
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer tmpFile.Close()
+	defer func(tmpFile *os.File) {
+		err := tmpFile.Close()
+		if err != nil {
+
+		}
+	}(tmpFile)
 
 	if _, err := tmpFile.WriteString(script); err != nil {
 		return fmt.Errorf("failed to write script: %w", err)
@@ -259,13 +264,22 @@ func (m *MockMCPServerProcess) Stop() error {
 
 	// Close pipes
 	if m.stdin != nil {
-		m.stdin.Close()
+		err := m.stdin.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if m.stdout != nil {
-		m.stdout.Close()
+		err := m.stdout.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if m.stderr != nil {
-		m.stderr.Close()
+		err := m.stderr.Close()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Kill the process
@@ -275,7 +289,10 @@ func (m *MockMCPServerProcess) Stop() error {
 		}
 
 		// Wait for process to exit
-		m.cmd.Wait()
+		err := m.cmd.Wait()
+		if err != nil {
+			return err
+		}
 	}
 
 	m.logger.Info("Mock MCP server stopped")
@@ -298,7 +315,7 @@ func (m *MockMCPServerProcess) GetCommand() []string {
 }
 
 // CreateTestUpstreamConfig creates an upstream config for testing with a real mock MCP server
-func CreateTestUpstreamConfig(logger *zap.Logger) (*UpstreamConfig, *MockMCPServerProcess, error) {
+func _(logger *zap.Logger) (*UpstreamConfig, *MockMCPServerProcess, error) {
 	mockServer := NewMockMCPServerProcess(logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -322,7 +339,7 @@ func CreateTestUpstreamConfig(logger *zap.Logger) (*UpstreamConfig, *MockMCPServ
 }
 
 // TestWithMockMCPServer is a helper function for tests that need a real MCP server
-func TestWithMockMCPServer(t interface{}, testFunc func(*UpstreamConfig, *MockMCPServerProcess)) {
+func _() {
 	// This is a helper that can be used in tests
 	// The actual implementation would depend on the testing framework being used
 }

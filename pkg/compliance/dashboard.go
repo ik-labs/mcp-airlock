@@ -282,7 +282,9 @@ func (cd *ComplianceDashboard) handleAPIReports(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(reports)
+	if err := json.NewEncoder(w).Encode(reports); err != nil {
+		cd.logger.Error("Failed to encode reports response", zap.Error(err))
+	}
 }
 
 // handleAPISummary serves compliance summary via API
@@ -297,7 +299,9 @@ func (cd *ComplianceDashboard) handleAPISummary(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	if err := json.NewEncoder(w).Encode(summary); err != nil {
+		cd.logger.Error("Failed to encode summary response", zap.Error(err))
+	}
 }
 
 // handleAPIValidate triggers compliance validation via API
@@ -328,7 +332,9 @@ func (cd *ComplianceDashboard) handleAPIValidate(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		cd.logger.Error("Failed to encode report response", zap.Error(err))
+	}
 }
 
 // generateDashboardData generates data for the compliance dashboard

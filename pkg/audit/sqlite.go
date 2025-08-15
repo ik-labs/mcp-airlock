@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -69,7 +70,10 @@ func NewSQLiteAuditLogger(config *AuditConfig) (*SQLiteAuditLogger, error) {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		err := db.Close()
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
 	}
 
@@ -85,14 +89,20 @@ func NewSQLiteAuditLogger(config *AuditConfig) (*SQLiteAuditLogger, error) {
 
 	// Initialize database schema first
 	if err := logger.initSchema(); err != nil {
-		logger.Close()
+		err := logger.Close()
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to initialize database schema: %w", err)
 	}
 
 	// Load or create hasher with persistent salt
 	hasher, err := logger.loadOrCreateHasher()
 	if err != nil {
-		logger.Close()
+		err := logger.Close()
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to initialize hasher: %w", err)
 	}
 	logger.hasher = hasher
@@ -101,7 +111,10 @@ func NewSQLiteAuditLogger(config *AuditConfig) (*SQLiteAuditLogger, error) {
 	if config.S3Bucket != "" {
 		awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(config.S3Region))
 		if err != nil {
-			logger.Close()
+			err := logger.Close()
+			if err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("failed to load AWS config: %w", err)
 		}
 		logger.s3Client = s3.NewFromConfig(awsConfig)
@@ -181,7 +194,7 @@ func (s *SQLiteAuditLogger) loadOrCreateHasher() (*Hasher, error) {
 	var saltHex string
 	err := s.db.QueryRow("SELECT value FROM audit_metadata WHERE key = 'hasher_salt'").Scan(&saltHex)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// No existing salt, create new hasher and store salt
 		hasher := NewHasher()
 		salt := hasher.GetSalt()
@@ -249,7 +262,10 @@ func (s *SQLiteAuditLogger) LogEvent(ctx context.Context, event *AuditEvent) err
 	s.flushTimer = time.AfterFunc(s.config.FlushTimeout, func() {
 		s.bufferMutex.Lock()
 		defer s.bufferMutex.Unlock()
-		s.flushBuffer()
+		err := s.flushBuffer()
+		if err != nil {
+			return
+		}
 	})
 
 	return nil
@@ -266,7 +282,12 @@ func (s *SQLiteAuditLogger) flushBuffer() error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func(tx *sql.Tx) {
+		err := tx.Rollback()
+		if err != nil {
+
+		}
+	}(tx)
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO audit_events (
@@ -278,13 +299,22 @@ func (s *SQLiteAuditLogger) flushBuffer() error {
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func(stmt *sql.Stmt) {
+		err := stmt.Close()
+		if err != nil {
+
+		}
+	}(stmt)
 
 	// Insert all buffered events
 	for _, event := range s.eventBuffer {
-		metadataJSON, _ := json.Marshal(event.Metadata)
+		metadataJSON, err := json.Marshal(event.Metadata)
+		if err != nil {
+			// Log error but continue with empty metadata
+			metadataJSON = []byte("{}")
+		}
 
-		_, err := stmt.Exec(
+		_, err = stmt.Exec(
 			event.ID,
 			event.Timestamp.UnixNano(),
 			event.CorrelationID,
@@ -325,8 +355,8 @@ func (s *SQLiteAuditLogger) Query(ctx context.Context, filter *QueryFilter) ([]*
 	}
 
 	query := "SELECT id, timestamp, correlation_id, tenant, subject, action, resource, decision, reason, metadata, hash, previous_hash, latency_ms, redaction_count FROM audit_events"
-	args := []interface{}{}
-	conditions := []string{}
+	var args []interface{}
+	var conditions []string
 
 	// Build WHERE clause
 	if filter.StartTime != nil {
@@ -388,7 +418,12 @@ func (s *SQLiteAuditLogger) Query(ctx context.Context, filter *QueryFilter) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	// Parse results
 	var events []*AuditEvent
@@ -483,7 +518,7 @@ func (s *SQLiteAuditLogger) GetLastHash(ctx context.Context) (string, error) {
 		"SELECT hash FROM audit_events ORDER BY timestamp DESC, id DESC LIMIT 1",
 	).Scan(&hash)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil // Empty chain
 	}
 	if err != nil {
@@ -538,13 +573,19 @@ func (s *SQLiteAuditLogger) flushRoutine() {
 		case <-s.ctx.Done():
 			// Final flush before shutdown
 			s.bufferMutex.Lock()
-			s.flushBuffer()
+			err := s.flushBuffer()
+			if err != nil {
+				return
+			}
 			s.bufferMutex.Unlock()
 			return
 
 		case <-ticker.C:
 			s.bufferMutex.Lock()
-			s.flushBuffer()
+			err := s.flushBuffer()
+			if err != nil {
+				return
+			}
 			s.bufferMutex.Unlock()
 		}
 	}
@@ -571,7 +612,10 @@ func (s *SQLiteAuditLogger) cleanupRoutine() {
 				correlationID := uuid.New().String()
 				cutoffTime := time.Now().UTC().AddDate(0, 0, -s.config.RetentionDays)
 				cleanupEvent := NewRetentionCleanupEvent(correlationID, deleted, cutoffTime)
-				s.LogEvent(s.ctx, cleanupEvent)
+				err := s.LogEvent(s.ctx, cleanupEvent)
+				if err != nil {
+					return
+				}
 			}
 		}
 	}
@@ -644,7 +688,7 @@ func (s *SQLiteAuditLogger) CreateTombstone(ctx context.Context, subject, reason
 // ExportToS3 exports audit events to S3 with optional KMS encryption
 func (s *SQLiteAuditLogger) ExportToS3(ctx context.Context, bucket, prefix string, kmsKeyID string) error {
 	if s.s3Client == nil {
-		return fmt.Errorf("S3 client not initialized")
+		return fmt.Errorf("s3 client not initialized")
 	}
 
 	// Generate export filename with timestamp
@@ -692,7 +736,12 @@ func (s *SQLiteAuditLogger) loadTombstones(ctx context.Context) (map[string]bool
 	if err != nil {
 		return tombstones, nil // Return empty map if table doesn't exist yet
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	for rows.Next() {
 		var subject string
@@ -702,14 +751,18 @@ func (s *SQLiteAuditLogger) loadTombstones(ctx context.Context) (map[string]bool
 		tombstones[subject] = true
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
 	return tombstones, nil
 }
 
 // queryRaw retrieves audit events without applying tombstone redaction (for internal use)
 func (s *SQLiteAuditLogger) queryRaw(ctx context.Context, filter *QueryFilter) ([]*AuditEvent, error) {
 	query := "SELECT id, timestamp, correlation_id, tenant, subject, action, resource, decision, reason, metadata, hash, previous_hash, latency_ms, redaction_count FROM audit_events"
-	args := []interface{}{}
-	conditions := []string{}
+	var args []interface{}
+	var conditions []string
 
 	// Build WHERE clause
 	if filter.StartTime != nil {
@@ -771,7 +824,12 @@ func (s *SQLiteAuditLogger) queryRaw(ctx context.Context, filter *QueryFilter) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	// Parse results (without tombstone redaction)
 	var events []*AuditEvent

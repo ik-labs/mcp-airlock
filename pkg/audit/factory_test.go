@@ -24,7 +24,12 @@ func TestNewAuditLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create audit logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger AuditLogger) {
+		err := logger.Close()
+		if err != nil {
+			
+		}
+	}(logger)
 
 	if logger == nil {
 		t.Fatal("Logger should not be nil")

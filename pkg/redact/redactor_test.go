@@ -3,6 +3,7 @@ package redact
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -253,7 +254,7 @@ func TestRedactWithContextCancellation(t *testing.T) {
 	testData := []byte("test data")
 
 	_, err = redactor.RedactRequest(ctx, testData)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled error, got %v", err)
 	}
 }

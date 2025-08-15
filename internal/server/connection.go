@@ -177,7 +177,7 @@ func (cp *ConnectionPool) CleanupStaleConnections() {
 }
 
 // Handle processes the client connection
-func (c *ClientConnection) Handle(ctx context.Context) {
+func (c *ClientConnection) Handle() {
 	c.logger.Info("Starting connection handler")
 
 	// Set up SSE headers
@@ -234,10 +234,13 @@ func (c *ClientConnection) setupSSEHeaders() {
 	c.writer.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
 
 	// Send initial connection event
-	c.writeSSEEvent("connected", map[string]interface{}{
+	err := c.writeSSEEvent("connected", map[string]interface{}{
 		"connection_id": c.id,
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	})
+	if err != nil {
+		return
+	}
 }
 
 // handleSSEWriter handles outbound SSE messages with backpressure
@@ -332,7 +335,10 @@ func (c *ClientConnection) handleRequestReader() {
 
 			// Send oversized request error
 			errorData := c.createOversizedMessageError()
-			c.sendMessage(errorData)
+			err := c.sendMessage(errorData)
+			if err != nil {
+				return
+			}
 			return
 		}
 
@@ -648,7 +654,10 @@ func (c *ClientConnection) sendErrorResponse(err error) {
 		return
 	}
 
-	c.sendMessage(data)
+	err = c.sendMessage(data)
+	if err != nil {
+		return
+	}
 }
 
 // sendMessage sends a message with backpressure handling

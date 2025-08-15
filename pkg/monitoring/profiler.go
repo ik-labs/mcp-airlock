@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" // Import pprof for runtime profiling
@@ -87,7 +88,7 @@ func (p *Profiler) Start() error {
 	go func() {
 		defer p.wg.Done()
 		p.logger.Info("Starting pprof server", zap.String("addr", p.httpServer.Addr))
-		if err := p.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := p.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			p.logger.Error("pprof server error", zap.Error(err))
 		}
 	}()

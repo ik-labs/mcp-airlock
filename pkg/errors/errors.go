@@ -5,6 +5,7 @@ package errors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -33,21 +34,17 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.HTTPStatus, e.MCPError.Error())
 }
 
-// MCP Error Codes (JSON-RPC 2.0 specification)
 const (
-	// Standard JSON-RPC errors
-	ErrorCodeParseError     = -32700
 	ErrorCodeInvalidRequest = -32600
-	ErrorCodeMethodNotFound = -32601
-	ErrorCodeInvalidParams  = -32602
-	ErrorCodeInternalError  = -32603
 
-	// MCP-specific errors (application-defined range)
-	ErrorCodeForbidden        = -32000
-	ErrorCodeRequestTooLarge  = -32001
-	ErrorCodeUpstreamFailure  = -32002
-	ErrorCodeRateLimitHit     = -32003
-	ErrorCodePolicyDenied     = -32004
+	ErrorCodeInternalError = -32603
+
+	// ErrorCodeForbidden MCP-specific errors (application-defined range)
+	ErrorCodeForbidden       = -32000
+	ErrorCodeRequestTooLarge = -32001
+	ErrorCodeUpstreamFailure = -32002
+	ErrorCodeRateLimitHit    = -32003
+
 	ErrorCodeAuthFailed       = -32005
 	ErrorCodeResourceNotFound = -32006
 	ErrorCodeTimeout          = -32007
@@ -223,7 +220,8 @@ func MapHTTPStatusToMCP(httpStatus int) int {
 
 // IsRetryableError determines if an error should trigger retry logic
 func IsRetryableError(err error) bool {
-	if httpErr, ok := err.(*HTTPError); ok {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
 		switch httpErr.HTTPStatus {
 		case http.StatusBadGateway,
 			http.StatusServiceUnavailable,
@@ -236,7 +234,8 @@ func IsRetryableError(err error) bool {
 
 // IsClientError determines if an error is a client-side error (4xx)
 func IsClientError(err error) bool {
-	if httpErr, ok := err.(*HTTPError); ok {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
 		return httpErr.HTTPStatus >= 400 && httpErr.HTTPStatus < 500
 	}
 	return false
@@ -244,7 +243,8 @@ func IsClientError(err error) bool {
 
 // IsServerError determines if an error is a server-side error (5xx)
 func IsServerError(err error) bool {
-	if httpErr, ok := err.(*HTTPError); ok {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
 		return httpErr.HTTPStatus >= 500
 	}
 	return false

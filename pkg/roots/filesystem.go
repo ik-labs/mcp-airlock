@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Error types for better test robustness
@@ -112,7 +114,11 @@ func (fs *filesystemBackend) Write(ctx context.Context, path string, data io.Rea
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			fs.logger.Error("Failed to close file", zap.String("path", path), zap.Error(closeErr))
+		}
+	}()
 
 	// Copy data to file
 	_, err = io.Copy(file, data)

@@ -317,7 +317,9 @@ func (rl *RateLimiter) RateLimitMiddleware(next http.Handler) http.Handler {
 				"id": nil,
 			}
 
-			_ = writeJSON(w, errorResponse)
+			if err := writeJSON(w, errorResponse); err != nil {
+				rl.logger.Error("Failed to write rate limit error response", zap.Error(err))
+			}
 			return
 		}
 

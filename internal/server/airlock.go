@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -12,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Import health types (these would be imported from the health package)
+// HealthChecker Import health types (these would be imported from the health package)
 type HealthChecker interface {
 	RegisterCheck(name string, checkFunc func(ctx context.Context) (string, string))
 	RunAllChecks(ctx context.Context)
@@ -242,7 +243,7 @@ func (s *AirlockServer) Start(ctx context.Context) error {
 
 		s.logger.Info("HTTP server listening", zap.String("addr", s.config.Addr))
 
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error("HTTP server error", zap.Error(err))
 			select {
 			case serverStarted <- err:
@@ -403,7 +404,7 @@ func (s *AirlockServer) handleMCPConnection(w http.ResponseWriter, r *http.Reque
 	// the ClientConnection type supports it
 
 	// Handle the connection (blocks until connection closes)
-	conn.Handle(ctx)
+	conn.Handle()
 
 	s.logger.Info("MCP connection closed",
 		zap.String("correlation_id", correlationID),
@@ -501,8 +502,11 @@ func (s *AirlockServer) RegisterHealthChecks(authenticator, policyEngine, auditL
 
 			// If audit store is unhealthy, send critical alert
 			if status == "unhealthy" && s.alertHandler != nil {
-				s.alertHandler.SendAlert(ctx, "critical", "audit_store",
+				err := s.alertHandler.SendAlert(ctx, "critical", "audit_store",
 					fmt.Sprintf("Audit store failure: %s", message))
+				if err != nil {
+					return "", ""
+				}
 			}
 
 			return status, message
@@ -535,7 +539,10 @@ func (s *AirlockServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		// Fallback if health checker not initialized
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+		_, err := fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -554,10 +561,16 @@ func (s *AirlockServer) handleReady(w http.ResponseWriter, r *http.Request) {
 
 		if ready {
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+			_, err := fmt.Fprintf(w, `{"status":"ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+			if err != nil {
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"status":"not_ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+			_, err := fmt.Fprintf(w, `{"status":"not_ready","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+			if err != nil {
+				return
+			}
 		}
 	}
 }

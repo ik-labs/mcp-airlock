@@ -76,12 +76,17 @@ func addPerformanceCommands(rootCmd *cobra.Command) {
 }
 
 // runProfileCommand starts performance profiling
-func runProfileCommand(cmd *cobra.Command, args []string) error {
+func runProfileCommand(cmd *cobra.Command, _ []string) error {
 	addr, _ := cmd.Flags().GetString("addr")
 	duration, _ := cmd.Flags().GetDuration("duration")
 
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		err := logger.Sync()
+		if err != nil {
+
+		}
+	}(logger)
 
 	config := monitoring.Config{
 		Enabled:         true,
@@ -118,13 +123,18 @@ func runProfileCommand(cmd *cobra.Command, args []string) error {
 }
 
 // runOptimizeCommand runs performance optimization
-func runOptimizeCommand(cmd *cobra.Command, args []string) error {
+func runOptimizeCommand(cmd *cobra.Command, _ []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	tuneFor, _ := cmd.Flags().GetString("tune-for")
 	auto, _ := cmd.Flags().GetBool("auto")
 
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		err := logger.Sync()
+		if err != nil {
+
+		}
+	}(logger)
 
 	// Create profiler for metrics
 	profilerConfig := monitoring.Config{
@@ -147,12 +157,22 @@ func runOptimizeCommand(cmd *cobra.Command, args []string) error {
 	if err := profiler.Start(); err != nil {
 		return fmt.Errorf("failed to start profiler: %w", err)
 	}
-	defer profiler.Stop()
+	defer func(profiler *monitoring.Profiler) {
+		err := profiler.Stop()
+		if err != nil {
+
+		}
+	}(profiler)
 
 	if err := optimizer.Start(); err != nil {
 		return fmt.Errorf("failed to start optimizer: %w", err)
 	}
-	defer optimizer.Stop()
+	defer func(optimizer *monitoring.Optimizer) {
+		err := optimizer.Stop()
+		if err != nil {
+
+		}
+	}(optimizer)
 
 	// Wait a moment for metrics collection
 	time.Sleep(2 * time.Second)
@@ -210,12 +230,17 @@ func runOptimizeCommand(cmd *cobra.Command, args []string) error {
 }
 
 // runReportCommand generates performance report
-func runReportCommand(cmd *cobra.Command, args []string) error {
+func runReportCommand(cmd *cobra.Command, _ []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	filename, _ := cmd.Flags().GetString("file")
 
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		err := logger.Sync()
+		if err != nil {
+
+		}
+	}(logger)
 
 	// Create profiler for metrics
 	config := monitoring.Config{
@@ -228,7 +253,12 @@ func runReportCommand(cmd *cobra.Command, args []string) error {
 	if err := profiler.Start(); err != nil {
 		return fmt.Errorf("failed to start profiler: %w", err)
 	}
-	defer profiler.Stop()
+	defer func(profiler *monitoring.Profiler) {
+		err := profiler.Stop()
+		if err != nil {
+
+		}
+	}(profiler)
 
 	// Wait for metrics collection
 	time.Sleep(2 * time.Second)
@@ -261,7 +291,7 @@ func runReportCommand(cmd *cobra.Command, args []string) error {
 }
 
 // runBenchmarkCommand runs performance benchmarks
-func runBenchmarkCommand(cmd *cobra.Command, args []string) error {
+func runBenchmarkCommand(cmd *cobra.Command, _ []string) error {
 	duration, _ := cmd.Flags().GetDuration("duration")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
 	rps, _ := cmd.Flags().GetInt("rps")

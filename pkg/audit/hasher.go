@@ -76,8 +76,14 @@ func (h *Hasher) HashEvent(event *AuditEvent) (string, error) {
 
 	// Create Blake3 hasher with salt
 	hasher := blake3.New()
-	hasher.Write(h.salt)
-	hasher.Write(jsonData)
+	_, err = hasher.Write(h.salt)
+	if err != nil {
+		return "", err
+	}
+	_, err = hasher.Write(jsonData)
+	if err != nil {
+		return "", err
+	}
 
 	// Return hex-encoded hash
 	hash := hasher.Sum(nil)
@@ -141,7 +147,13 @@ func (h *Hasher) GenesisHash() string {
 // HashString computes a Blake3 hash of a string with the hasher's salt
 func (h *Hasher) HashString(input string) []byte {
 	hasher := blake3.New()
-	hasher.Write(h.salt)
-	hasher.Write([]byte(input))
+	_, err := hasher.Write(h.salt)
+	if err != nil {
+		return nil
+	}
+	_, err = hasher.Write([]byte(input))
+	if err != nil {
+		return nil
+	}
 	return hasher.Sum(nil)
 }

@@ -17,7 +17,7 @@ type MockS3Client struct {
 	putObjectError error
 }
 
-func (m *MockS3Client) PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+func (m *MockS3Client) PutObject(_ context.Context, params *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	if m.putObjectCalls == nil {
 		m.putObjectCalls = make([]s3.PutObjectInput, 0)
 	}
@@ -52,7 +52,12 @@ func TestSQLiteAuditLogger_ExportToS3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	// Replace the S3 client with our mock
 	mockS3 := &MockS3Client{}
@@ -136,7 +141,12 @@ func TestSQLiteAuditLogger_ExportToS3WithKMS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	// Replace the S3 client with our mock
 	mockS3 := &MockS3Client{}
@@ -194,7 +204,12 @@ func TestSQLiteAuditLogger_ExportToS3WithoutClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	ctx := context.Background()
 
@@ -229,7 +244,12 @@ func TestSQLiteAuditLogger_ExportToS3EmptyData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func(logger *SQLiteAuditLogger) {
+		err := logger.Close()
+		if err != nil {
+
+		}
+	}(logger)
 
 	// Replace the S3 client with our mock
 	mockS3 := &MockS3Client{}

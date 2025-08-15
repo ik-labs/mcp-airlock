@@ -271,7 +271,7 @@ func FuzzRequestBody(f *testing.F) {
 		[]byte(`<xml><data>test</data></xml>`),
 		[]byte("form=data&other=value"),
 		[]byte(strings.Repeat("a", 1000)),
-		[]byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD},
+		{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD},
 		[]byte("body\r\nwith\r\nnewlines"),
 		[]byte("body\x00with\x00nulls"),
 	}

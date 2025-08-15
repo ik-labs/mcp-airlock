@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -54,12 +55,15 @@ func main() {
 
 	// Execute the root command
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, err := fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if err != nil {
+			return
+		}
 		os.Exit(1)
 	}
 }
 
-func runServer(cmd *cobra.Command, args []string) error {
+func runServer(cmd *cobra.Command, _ []string) error {
 	// Check if version flag was used
 	if versionFlag, _ := cmd.Flags().GetBool("version"); versionFlag {
 		fmt.Printf("MCP Airlock %s (commit: %s, built: %s)\n", Version, GitCommit, BuildTime)
@@ -77,10 +81,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Initialize logger (development mode for now)
 	logger, err := config.NewDevelopmentLogger()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		_, err := fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		if err != nil {
+			return err
+		}
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		err := logger.Sync()
+		if err != nil {
+
+		}
+	}(logger)
 
 	logger.Info("Starting MCP Airlock",
 		zap.String("version", Version),
@@ -130,7 +142,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Add a basic info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"version":"%s","commit":"%s","build_time":"%s"}`, Version, GitCommit, BuildTime)
+		_, err := fmt.Fprintf(w, `{"version":"%s","commit":"%s","build_time":"%s"}`, Version, GitCommit, BuildTime)
+		if err != nil {
+			return
+		}
 	})
 
 	server := &http.Server{
@@ -147,12 +162,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 		if cfg.Server.TLS.CertFile != "" && cfg.Server.TLS.KeyFile != "" {
 			logger.Info("Starting HTTPS server with TLS")
-			if err := server.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+			if err := server.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Fatal("HTTPS server failed", zap.Error(err))
 			}
 		} else {
 			logger.Info("Starting HTTP server (no TLS)")
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Fatal("HTTP server failed", zap.Error(err))
 			}
 		}

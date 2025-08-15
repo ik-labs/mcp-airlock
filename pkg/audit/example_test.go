@@ -17,7 +17,12 @@ func ExampleNewAuditLogger() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func(path string) {
+		err := os.RemoveAll(path)
+		if err != nil {
+
+		}
+	}(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "audit.db")
 
@@ -28,7 +33,12 @@ func ExampleNewAuditLogger() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer logger.Close()
+	defer func(logger audit.AuditLogger) {
+		err := logger.Close()
+		if err != nil {
+			
+		}
+	}(logger)
 
 	ctx := context.Background()
 

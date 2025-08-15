@@ -139,7 +139,12 @@ func TestEndToEndMessageFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer server.Stop(ctx)
+	defer func(server *AirlockServer, ctx context.Context) {
+		err := server.Stop(ctx)
+		if err != nil {
+
+		}
+	}(server, ctx)
 
 	// Test various MCP message flows
 	testCases := []struct {
@@ -416,7 +421,12 @@ func TestConcurrentConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer server.Stop(ctx)
+	defer func(server *AirlockServer, ctx context.Context) {
+		err := server.Stop(ctx)
+		if err != nil {
+			
+		}
+	}(server, ctx)
 
 	// Create multiple concurrent connections
 	numConnections := 3

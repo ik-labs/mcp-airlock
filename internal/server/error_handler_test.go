@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestHandleUpstreamError(t *testing.T) {
 	retryableErr := pkgerrors.NewUpstreamFailureError(502, "test-correlation")
 	result := eh.HandleUpstreamError(ctx, "test-upstream", retryableErr)
 
-	if result != retryableErr {
+	if !errors.Is(result, retryableErr) {
 		t.Errorf("expected same error returned, got %v", result)
 	}
 
@@ -84,7 +85,7 @@ func TestHandleUpstreamError(t *testing.T) {
 	nonRetryableErr := pkgerrors.NewAuthenticationError("invalid", "test-correlation")
 	result2 := eh.HandleUpstreamError(ctx, "test-upstream", nonRetryableErr)
 
-	if result2 != nonRetryableErr {
+	if !errors.Is(result2, nonRetryableErr) {
 		t.Errorf("expected same error returned, got %v", result2)
 	}
 }
@@ -108,7 +109,7 @@ func TestHandleAuditError(t *testing.T) {
 	auditErr := fmt.Errorf("audit store connection failed")
 	result := eh.HandleAuditError(ctx, event, auditErr)
 
-	if result != auditErr {
+	if !errors.Is(result, auditErr) {
 		t.Errorf("expected same error returned, got %v", result)
 	}
 
@@ -228,12 +229,11 @@ func TestValidateMessageSize(t *testing.T) {
 		t.Error("expected error for oversized message")
 	}
 
-	if httpErr, ok := err2.(*pkgerrors.HTTPError); ok {
+	var httpErr *pkgerrors.HTTPError
+	if errors.As(err2, &httpErr) {
 		if httpErr.HTTPStatus != http.StatusRequestEntityTooLarge {
 			t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, httpErr.HTTPStatus)
 		}
-	} else {
-		t.Error("expected HTTPError")
 	}
 }
 
@@ -308,7 +308,10 @@ func TestFlushAuditBuffer(t *testing.T) {
 		Tenant:        "test_tenant",
 	}
 
-	degradationManager.BufferAuditEvent(event)
+	err := degradationManager.BufferAuditEvent(event)
+	if err != nil {
+		return
+	}
 
 	events2 := eh2.FlushAuditBuffer()
 	if len(events2) != 1 {

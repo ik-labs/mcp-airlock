@@ -509,7 +509,7 @@ func TestTimingAttackResistance(t *testing.T) {
 	}
 
 	if len(durations) > 1 {
-		var min, max time.Duration = durations[0], durations[0]
+		var min, max = durations[0], durations[0]
 		for _, d := range durations {
 			if d < min {
 				min = d

@@ -3,6 +3,7 @@ package errors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -192,7 +193,7 @@ func TestToJSONRPCResponse(t *testing.T) {
 		t.Errorf("expected ID %q, got %v", requestID, response.ID)
 	}
 
-	if response.Error != err.MCPError {
+	if !errors.Is(response.Error, err.MCPError) {
 		t.Error("expected error to match MCPError")
 	}
 }

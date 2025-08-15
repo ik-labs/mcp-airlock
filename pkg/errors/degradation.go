@@ -317,6 +317,8 @@ func (dm *DegradationManager) updateDegradationMode(serviceName string, _ error)
 			dm.mode = ModeAuditBuffering
 		case ModePolicyLKG:
 			dm.mode = ModeEmergency
+		default:
+			panic("unhandled default case")
 		}
 
 	case "policy":
@@ -325,6 +327,8 @@ func (dm *DegradationManager) updateDegradationMode(serviceName string, _ error)
 			dm.mode = ModePolicyLKG
 		case ModeAuditBuffering:
 			dm.mode = ModeEmergency
+		default:
+			panic("unhandled default case")
 		}
 
 	case "upstream":
@@ -363,6 +367,8 @@ func (dm *DegradationManager) checkRecovery() {
 		if policyHealthy {
 			dm.mode = ModeNormal
 		}
+	default:
+		panic("unhandled default case")
 	}
 }
 

@@ -2,6 +2,7 @@ package errors
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -87,7 +88,7 @@ func TestRetryMaxAttemptsReached(t *testing.T) {
 		t.Errorf("expected 2 attempts, got %d", result.Attempts)
 	}
 
-	if result.LastError != expectedErr {
+	if !errors.Is(expectedErr, result.LastError) {
 		t.Errorf("expected error %v, got %v", expectedErr, result.LastError)
 	}
 
@@ -119,7 +120,7 @@ func TestRetryNonRetryableError(t *testing.T) {
 		t.Errorf("expected 1 attempt, got %d", result.Attempts)
 	}
 
-	if result.LastError != expectedErr {
+	if !errors.Is(expectedErr, result.LastError) {
 		t.Errorf("expected error %v, got %v", expectedErr, result.LastError)
 	}
 
@@ -157,7 +158,7 @@ func TestRetryContextCancellation(t *testing.T) {
 		t.Errorf("expected fewer than 5 attempts due to timeout, got %d", result.Attempts)
 	}
 
-	if result.LastError != context.DeadlineExceeded {
+	if !errors.Is(result.LastError, context.DeadlineExceeded) {
 		t.Errorf("expected context.DeadlineExceeded, got %v", result.LastError)
 	}
 }
@@ -274,7 +275,7 @@ func TestCircuitBreakerBasicOperation(t *testing.T) {
 		return err1
 	})
 
-	if err != err1 {
+	if !errors.Is(err, err1) {
 		t.Errorf("expected error %v, got %v", err1, err)
 	}
 
@@ -292,7 +293,7 @@ func TestCircuitBreakerBasicOperation(t *testing.T) {
 		return err2
 	})
 
-	if err != err2 {
+	if !errors.Is(err2, err) {
 		t.Errorf("expected error %v, got %v", err2, err)
 	}
 
@@ -347,7 +348,7 @@ func TestCircuitBreakerNonRetryableErrors(t *testing.T) {
 		return authErr
 	})
 
-	if err != authErr {
+	if !errors.Is(err, authErr) {
 		t.Errorf("expected error %v, got %v", authErr, err)
 	}
 
@@ -529,6 +530,9 @@ func BenchmarkCircuitBreakerExecute(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ctx := context.Background()
-		cb.Execute(ctx, fn)
+		err := cb.Execute(ctx, fn)
+		if err != nil {
+			return
+		}
 	}
 }

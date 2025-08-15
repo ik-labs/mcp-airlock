@@ -163,13 +163,19 @@ func TestAirlockServer_Race(t *testing.T) {
 			defer func() { done <- true }()
 
 			// Try to start
-			server.Start(ctx)
+			err := server.Start(ctx)
+			if err != nil {
+				return
+			}
 
 			// Small delay
 			time.Sleep(10 * time.Millisecond)
 
 			// Try to stop
-			server.Stop(ctx)
+			err = server.Stop(ctx)
+			if err != nil {
+				return
+			}
 		}()
 	}
 
