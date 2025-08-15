@@ -46,7 +46,7 @@ func TestPolicyIntegration_AuthorizeResourceAccess(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(rootConfigs, nil)
+	mapper, err := NewRootMapper(rootConfigs, nil, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}

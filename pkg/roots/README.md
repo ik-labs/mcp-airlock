@@ -59,7 +59,7 @@ configs := []roots.RootConfig{
 }
 
 // Create root mapper
-mapper, err := roots.NewRootMapper(configs, s3Client)
+mapper, err := roots.NewRootMapper(configs, s3Client, logger)
 if err != nil {
     log.Fatal(err)
 }

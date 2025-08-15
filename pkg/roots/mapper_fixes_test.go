@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestDuplicateVirtualRootPrevention(t *testing.T) {
@@ -103,7 +105,7 @@ func TestDuplicateVirtualRootPrevention(t *testing.T) {
 		tt := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := NewRootMapper(tt.configs, nil)
+			_, err := NewRootMapper(tt.configs, nil, zap.NewNop())
 
 			if tt.expectError {
 				if err == nil {
@@ -142,7 +144,7 @@ func TestS3URIPathConstruction(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -235,7 +237,7 @@ func TestS3URIEdgeCases(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}

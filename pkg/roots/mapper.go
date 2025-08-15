@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // Error types for better test robustness
@@ -67,14 +69,16 @@ type RootConfig struct {
 type rootMapper struct {
 	roots    map[string]*RootConfig
 	backends map[string]Backend
+	logger   *zap.Logger
 	mu       sync.RWMutex
 }
 
 // NewRootMapper creates a new RootMapper instance
-func NewRootMapper(configs []RootConfig, s3Client S3Client) (RootMapper, error) {
+func NewRootMapper(configs []RootConfig, s3Client S3Client, logger *zap.Logger) (RootMapper, error) {
 	rm := &rootMapper{
 		roots:    make(map[string]*RootConfig),
 		backends: make(map[string]Backend),
+		logger:   logger,
 	}
 
 	for _, config := range configs {
@@ -99,12 +103,12 @@ func NewRootMapper(configs []RootConfig, s3Client S3Client) (RootMapper, error) 
 		// Create appropriate backend
 		switch config.Type {
 		case "fs":
-			rm.backends[config.Virtual] = NewFilesystemBackend(config.Real, config.ReadOnly)
+			rm.backends[config.Virtual] = NewFilesystemBackend(config.Real, config.ReadOnly, rm.logger)
 		case "s3":
 			if s3Client == nil {
 				return nil, fmt.Errorf("S3 client required for S3 backend %s", config.Name)
 			}
-			rm.backends[config.Virtual] = NewS3Backend(s3Client, config.Real, config.ReadOnly)
+			rm.backends[config.Virtual] = NewS3Backend(s3Client, config.Real, config.ReadOnly, rm.logger)
 		default:
 			return nil, fmt.Errorf("unsupported backend type: %s", config.Type)
 		}

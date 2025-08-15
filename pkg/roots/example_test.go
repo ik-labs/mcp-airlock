@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 // ExampleRootMapper demonstrates basic usage of the RootMapper
@@ -23,7 +25,7 @@ func ExampleRootMapper() {
 	}
 
 	// Create root mapper
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		fmt.Printf("Error creating mapper: %v\n", err)
 		return
@@ -76,7 +78,7 @@ func TestZeroCopyStreaming(t *testing.T) {
 	}
 
 	// Create filesystem backend
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	// Stream the file content
 	reader, err := backend.Read(context.Background(), testFile)

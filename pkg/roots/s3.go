@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"go.uber.org/zap"
 )
 
 // Error types for better test robustness
@@ -32,10 +33,11 @@ type s3Backend struct {
 	prefix             string
 	readOnly           bool
 	allowedWritePrefix string // For R19.4: single allow-listed artifacts prefix
+	logger             *zap.Logger
 }
 
 // NewS3Backend creates a new S3 backend
-func NewS3Backend(client S3Client, s3URI string, readOnly bool) Backend {
+func NewS3Backend(client S3Client, s3URI string, readOnly bool, logger *zap.Logger) Backend {
 	// Parse S3 URI (s3://bucket/prefix/)
 	uri := strings.TrimPrefix(s3URI, "s3://")
 	parts := strings.SplitN(uri, "/", 2)
@@ -62,6 +64,7 @@ func NewS3Backend(client S3Client, s3URI string, readOnly bool) Backend {
 		prefix:             prefix,
 		readOnly:           effectiveReadOnly,
 		allowedWritePrefix: allowedWritePrefix,
+		logger:             logger,
 	}
 }
 

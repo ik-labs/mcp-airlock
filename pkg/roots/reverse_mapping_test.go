@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestRootMapper_ReverseMap(t *testing.T) {
@@ -35,7 +37,7 @@ func TestRootMapper_ReverseMap(t *testing.T) {
 
 	// Create root mapper with mock S3 client
 	mockS3Client := newMockS3Client()
-	mapper, err := NewRootMapper(rootConfigs, mockS3Client)
+	mapper, err := NewRootMapper(rootConfigs, mockS3Client, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestRootMiddleware_ConvertRealPathToVirtualURI(t *testing.T) {
 	}
 
 	// Create root mapper and middleware
-	mapper, err := NewRootMapper(rootConfigs, nil)
+	mapper, err := NewRootMapper(rootConfigs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}

@@ -27,14 +27,16 @@ type filesystemBackend struct {
 	rootPath     string
 	readOnly     bool
 	mountLevelRO bool // R4.2: Mount-level read-only enforcement
+	logger       *zap.Logger
 }
 
 // NewFilesystemBackend creates a new filesystem backend
-func NewFilesystemBackend(rootPath string, readOnly bool) Backend {
+func NewFilesystemBackend(rootPath string, readOnly bool, logger *zap.Logger) Backend {
 	return &filesystemBackend{
 		rootPath:     rootPath,
 		readOnly:     readOnly,
 		mountLevelRO: readOnly, // R4.2: Enable mount-level enforcement for read-only roots
+		logger:       logger,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"go.uber.org/zap"
 )
 
 // mockS3Client implements a mock S3 client for testing
@@ -143,7 +144,7 @@ func TestS3Backend_Read(t *testing.T) {
 	testContent := "Hello, S3!"
 	mockClient.setObject(testKey, []byte(testContent))
 
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	tests := []struct {
 		name            string
@@ -238,7 +239,7 @@ func TestS3Backend_Write(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", tt.readOnly)
+			backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", tt.readOnly, zap.NewNop())
 
 			err := backend.Write(context.Background(), tt.path, strings.NewReader(tt.content))
 
@@ -280,7 +281,7 @@ func TestS3Backend_List(t *testing.T) {
 		mockClient.setObject(key, content)
 	}
 
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	files, err := backend.List(context.Background(), "")
 	if err != nil {
@@ -323,7 +324,7 @@ func TestS3Backend_Stat(t *testing.T) {
 	testContent := "test content for stat"
 	mockClient.setObject(testKey, []byte(testContent))
 
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	tests := []struct {
 		name         string
@@ -373,7 +374,7 @@ func TestS3Backend_Stat(t *testing.T) {
 
 func TestS3Backend_KeyValidation(t *testing.T) {
 	mockClient := newMockS3Client()
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false).(*s3Backend)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop()).(*s3Backend)
 
 	tests := []struct {
 		name        string
@@ -458,7 +459,7 @@ func TestS3Backend_BuildKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockClient := newMockS3Client()
-			backend := NewS3Backend(mockClient, tt.s3URI, false).(*s3Backend)
+			backend := NewS3Backend(mockClient, tt.s3URI, false, zap.NewNop()).(*s3Backend)
 
 			key := backend.buildKey(tt.path)
 

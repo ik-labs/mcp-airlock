@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestFilesystemBackend_Read(t *testing.T) {
@@ -19,7 +21,7 @@ func TestFilesystemBackend_Read(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	tests := []struct {
 		name            string
@@ -114,7 +116,7 @@ func TestFilesystemBackend_Write(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			backend := NewFilesystemBackend(tempDir, tt.readOnly)
+			backend := NewFilesystemBackend(tempDir, tt.readOnly, zap.NewNop())
 
 			err := backend.Write(context.Background(), tt.path, strings.NewReader(tt.content))
 
@@ -165,7 +167,7 @@ func TestFilesystemBackend_List(t *testing.T) {
 		}
 	}
 
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	files, err := backend.List(context.Background(), tempDir)
 	if err != nil {
@@ -207,7 +209,7 @@ func TestFilesystemBackend_Stat(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	tests := []struct {
 		name         string
@@ -262,7 +264,7 @@ func TestFilesystemBackend_Stat(t *testing.T) {
 
 func TestFilesystemBackend_PathValidation(t *testing.T) {
 	tempDir := t.TempDir()
-	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop()).(*filesystemBackend)
 
 	tests := []struct {
 		name        string
@@ -316,7 +318,7 @@ func TestFilesystemBackend_SymlinkValidation(t *testing.T) {
 		t.Skipf("Cannot create symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop()).(*filesystemBackend)
 
 	tests := []struct {
 		name        string

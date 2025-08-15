@@ -31,7 +31,7 @@ func TestRootMiddleware_ProcessRequest(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(rootConfigs, nil)
+	mapper, err := NewRootMapper(rootConfigs, nil, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestRootMiddleware_ProcessResponse(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(rootConfigs, nil)
+	mapper, err := NewRootMapper(rootConfigs, nil, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestRootMiddleware_ProcessResponse(t *testing.T) {
 
 func TestRootMiddleware_IsResourceRequest(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	mapper, _ := NewRootMapper([]RootConfig{}, nil)
+	mapper, _ := NewRootMapper([]RootConfig{}, nil, zaptest.NewLogger(t))
 	middleware := NewRootMiddleware(mapper, logger)
 
 	tests := []struct {
@@ -362,7 +362,7 @@ func TestRootMiddleware_IsResourceRequest(t *testing.T) {
 
 func TestRootMiddleware_IsURIParameter(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	mapper, _ := NewRootMapper([]RootConfig{}, nil)
+	mapper, _ := NewRootMapper([]RootConfig{}, nil, zaptest.NewLogger(t))
 	middleware := NewRootMiddleware(mapper, logger)
 
 	tests := []struct {

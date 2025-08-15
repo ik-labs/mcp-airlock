@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestFilesystemBackend_WriteSymlinkSecurity(t *testing.T) {
@@ -24,7 +26,7 @@ func TestFilesystemBackend_WriteSymlinkSecurity(t *testing.T) {
 		t.Skipf("Cannot create symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	tests := []struct {
 		name        string
@@ -116,7 +118,7 @@ func TestFilesystemBackend_SymlinkEscapeDetection(t *testing.T) {
 		t.Skipf("Cannot create directory symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop()).(*filesystemBackend)
 
 	tests := []struct {
 		name        string
@@ -200,7 +202,7 @@ func TestFilesystemBackend_NestedSymlinkEscape(t *testing.T) {
 		t.Skipf("Cannot create nested symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop()).(*filesystemBackend)
 
 	tests := []struct {
 		name        string
@@ -251,7 +253,7 @@ func TestFilesystemBackend_CreateFileSecure(t *testing.T) {
 		t.Skipf("Cannot create symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false).(*filesystemBackend)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop()).(*filesystemBackend)
 
 	tests := []struct {
 		name        string
@@ -321,7 +323,7 @@ func TestFilesystemBackend_ReadSymlinkValidation(t *testing.T) {
 		t.Skipf("Cannot create symlink (may not be supported): %v", err)
 	}
 
-	backend := NewFilesystemBackend(tempDir, false)
+	backend := NewFilesystemBackend(tempDir, false, zap.NewNop())
 
 	// Test that reading through symlink is blocked
 	_, err := backend.Read(context.Background(), symlinkFile)

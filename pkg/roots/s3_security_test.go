@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"go.uber.org/zap"
 )
 
 func TestS3Backend_ListSecurityValidation(t *testing.T) {
@@ -23,7 +24,7 @@ func TestS3Backend_ListSecurityValidation(t *testing.T) {
 		mockClient.setObject(key, content)
 	}
 
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	tests := []struct {
 		name        string
@@ -97,7 +98,7 @@ func TestS3Backend_ListSecurityValidation(t *testing.T) {
 
 func TestS3Backend_SecurityConsistency(t *testing.T) {
 	mockClient := newMockS3Client()
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	// Test paths that should be rejected by all methods
 	maliciousPaths := []string{
@@ -157,7 +158,7 @@ func TestS3Backend_ListValidationBeforeS3Call(t *testing.T) {
 		listCalled:   false,
 	}
 
-	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false)
+	backend := NewS3Backend(mockClient, "s3://test-bucket/test-prefix/", false, zap.NewNop())
 
 	// Try to list with a malicious path
 	_, err := backend.List(context.Background(), "../../../etc")

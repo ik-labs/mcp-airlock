@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"go.uber.org/zap"
 )
 
 func TestRootMapper_MapURI(t *testing.T) {
@@ -24,7 +26,7 @@ func TestRootMapper_MapURI(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -105,7 +107,7 @@ func TestPathTraversalPrevention(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -155,7 +157,7 @@ func TestSpecificPathTraversalPatterns(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -199,7 +201,7 @@ func TestURIValidation(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -289,7 +291,7 @@ func TestValidateAccess(t *testing.T) {
 		},
 	}
 
-	mapper, err := NewRootMapper(configs, nil)
+	mapper, err := NewRootMapper(configs, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Failed to create root mapper: %v", err)
 	}
@@ -411,7 +413,7 @@ func TestConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewRootMapper([]RootConfig{tt.config}, nil)
+			_, err := NewRootMapper([]RootConfig{tt.config}, nil, zap.NewNop())
 
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error for config %+v", tt.config)
