@@ -18,12 +18,49 @@ MCP Airlock acts as a reverse proxy that enables hosts to communicate with MCP s
 
 ## Quick Start
 
-### Prerequisites
+### 🚀 Hackathon Demo (One Command Setup)
+
+**Want to see all security features in action?**
+
+```bash
+git clone <repository-url>
+cd mcp-airlock
+./scripts/run-demo.sh
+```
+
+**What the demo script does:**
+1. **Builds Airlock** from source
+2. **Generates JWT tokens** for 3 user roles (admin/developer/viewer)
+3. **Starts 2 MCP servers** with sample data:
+   - **Documentation Server**: Provides document search and file reading
+   - **Analytics Server**: Provides metrics querying and report generation
+4. **Launches Airlock** with full security configuration
+5. **Shows interactive examples** to test different security scenarios
+
+**Security features demonstrated:**
+- Zero-trust authentication with JWT tokens
+- OPA/Rego policy enforcement with role-based access control
+- Data loss prevention with automatic PII redaction
+- Virtual root security and path traversal protection
+- Comprehensive audit logging with hash chaining
+- Role-based rate limiting (admin: 1000/min, dev: 100/min, viewer: 50/min)
+
+**Demo includes 3 user roles:**
+- **Admin**: Full access to all tools and sensitive data
+- **Developer**: Limited access, blocked from reading secrets
+- **Viewer**: Read-only access to documentation only
+
+See [DEMO.md](DEMO.md) for detailed demo instructions and security test scenarios.
+
+### 📋 Manual Setup
+
+#### Prerequisites
 
 - Go 1.22 or later
+- Python 3.x (for MCP servers)
 - Make (optional, for using Makefile)
 
-### Installation
+#### Installation
 
 1. Clone the repository:
 ```bash
@@ -45,38 +82,60 @@ make build
 go build -o airlock ./cmd/airlock
 ```
 
-### Configuration
+#### Configuration Options
 
-1. Copy the example configuration:
+**For Hackathon Demo (Full Security Features):**
 ```bash
-cp config.yaml config-local.yaml
+./airlock -config config-demo.yaml
 ```
 
-2. Edit `config-local.yaml` to match your environment:
-   - Update OIDC issuer and audience
-   - Configure upstream MCP servers
-   - Set up virtual root mappings
-   - Configure audit storage location
-
-### Running
-
-1. Start the server:
+**For Development (Minimal Setup):**
 ```bash
-make run
-# or
-./airlock -config config-local.yaml
+./airlock -config config-minimal.yaml
 ```
 
-2. Check health endpoints:
+**For Testing (Zero Dependencies):**
 ```bash
-# Liveness probe
+./airlock -config config-standalone.yaml
+```
+
+#### Running
+
+**Option 1: Full Demo (Recommended for Hackathon)**
+```bash
+# Automated demo with MCP servers and sample data
+./scripts/run-demo.sh
+```
+
+**Option 2: Manual Setup**
+```bash
+# Start MCP servers first
+python3 examples/mcp-servers/docs-server.py &
+python3 examples/mcp-servers/analytics-server.py &
+
+# Then start Airlock
+./airlock -config config-demo.yaml
+```
+
+**Option 3: Minimal Development**
+```bash
+# Just Airlock without MCP servers
+./airlock -config config-standalone.yaml
+```
+
+#### Testing the Setup
+
+```bash
+# Health endpoints (no auth required)
 curl http://localhost:8080/live
-
-# Readiness probe
 curl http://localhost:8080/ready
-
-# Version info
 curl http://localhost:8080/info
+
+# Generate and use demo tokens (if using demo config)
+python3 scripts/generate-demo-tokens.py
+
+# Test with authentication
+curl -H "Authorization: Bearer <token>" http://localhost:8080/mcp/tools
 ```
 
 ## Development
@@ -84,14 +143,29 @@ curl http://localhost:8080/info
 ### Project Structure
 
 ```
-├── cmd/airlock/          # Main application entry point
+├── cmd/airlock/              # Main application entry point
 ├── pkg/
-│   ├── config/           # Configuration management
-│   ├── health/           # Health check functionality
-│   └── mcp/              # MCP SDK adapter interfaces
-├── internal/             # Internal packages
-├── config.yaml           # Example configuration
-├── Makefile              # Build automation
+│   ├── config/               # Configuration management
+│   ├── health/               # Health check functionality
+│   └── mcp/                  # MCP SDK adapter interfaces
+├── internal/                 # Internal packages
+├── examples/
+│   ├── mcp-servers/          # Sample MCP servers for demo
+│   │   ├── docs-server.py    # Documentation server
+│   │   └── analytics-server.py # Analytics server
+│   └── sample-docs/          # Sample documents with PII for testing
+├── scripts/
+│   ├── run-demo.sh           # One-command demo launcher
+│   └── generate-demo-tokens.py # JWT token generator
+├── configs/
+│   ├── policy.rego           # OPA authorization policies
+│   └── examples/             # Configuration examples
+├── config.yaml               # Production configuration example
+├── config-demo.yaml          # Hackathon demo configuration
+├── config-minimal.yaml       # Development configuration
+├── config-standalone.yaml    # Zero-dependency configuration
+├── DEMO.md                   # Comprehensive demo guide
+├── Makefile                  # Build automation
 └── README.md
 ```
 
@@ -143,7 +217,14 @@ The application uses YAML configuration with the following main sections:
 - `audit`: Audit logging and retention settings
 - `observability`: Metrics, tracing, and logging configuration
 
-See `config.yaml` for a complete example with documentation.
+### Configuration Files Available
+
+- **`config-demo.yaml`**: Full-featured hackathon demo with all security features
+- **`config-minimal.yaml`**: Development setup with basic MCP server connections
+- **`config-standalone.yaml`**: Zero-dependency testing configuration
+- **`config.yaml`**: Production-ready configuration template
+
+See individual config files for detailed examples and documentation.
 
 ## Health Checks
 

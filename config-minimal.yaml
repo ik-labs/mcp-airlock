@@ -1,0 +1,72 @@
+# Minimal MCP Airlock Configuration for Local Testing
+# This config removes all external dependencies
+
+server:
+  addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+# Disable authentication for local testing
+auth:
+  disabled: true
+
+# Simple allow-all policy (no OPA needed)
+policy:
+  disabled: true
+
+# Local file system roots only
+roots:
+  - name: "local-docs"
+    type: "fs"
+    virtual: "mcp://docs/"
+    real: "./examples/sample-docs"
+    read_only: true
+  - name: "temp-storage"
+    type: "fs"
+    virtual: "mcp://temp/"
+    real: "/tmp/airlock"
+    read_only: false
+
+# Minimal DLP patterns
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[redacted-email]"
+
+# No rate limiting for local testing
+rate_limiting:
+  disabled: true
+
+# Connect to the example MCP servers
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/tmp/docs.sock"
+    timeout: "30s"
+    allow_tools: ["search_docs", "read_file", "list_directory"]
+  - name: "analytics-server"
+    type: "unix"
+    socket: "/tmp/analytics.sock"
+    timeout: "30s"
+    allow_tools: ["query_metrics", "generate_report", "export_data", "get_dashboard_data"]
+
+# Simple local audit
+audit:
+  backend: "sqlite"
+  database: "/tmp/airlock-audit.db"
+  retention: "24h"
+
+# Basic observability
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: false
+  logging:
+    level: "debug"
+    format: "text"

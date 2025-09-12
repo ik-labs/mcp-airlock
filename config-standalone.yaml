@@ -1,0 +1,48 @@
+# Ultra-minimal MCP Airlock Configuration
+# Runs completely standalone with no dependencies
+
+server:
+  addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+# Disable all external dependencies
+auth:
+  disabled: true
+
+policy:
+  disabled: true
+
+# No virtual roots (simplest setup)
+roots: []
+
+# No DLP patterns
+dlp:
+  patterns: []
+
+# No rate limiting
+rate_limiting:
+  disabled: true
+
+# No upstream servers
+upstreams: []
+
+# Minimal audit to file
+audit:
+  backend: "file"
+  file: "/tmp/airlock-audit.log"
+  retention: "1h"
+
+# Basic observability
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: false
+  logging:
+    level: "debug"
+    format: "text"
