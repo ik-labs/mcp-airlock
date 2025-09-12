@@ -248,7 +248,9 @@ MCP Airlock implements defense-in-depth security:
 
 ## License
 
-[License information to be added]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+The MIT License is an OSI-approved open source license that allows for commercial and non-commercial use, modification, and distribution.
 
 ## Contributing
 
