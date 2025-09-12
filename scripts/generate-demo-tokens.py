@@ -6,7 +6,7 @@ These tokens are for demonstration purposes only.
 
 import jwt
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Demo secret (DO NOT use in production)
 SECRET = "demo-secret-key-for-hackathon-only"
@@ -17,8 +17,8 @@ def generate_token(user_id, role, groups, expires_hours=24):
         "sub": user_id,
         "role": role,
         "groups": groups,
-        "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(hours=expires_hours),
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=expires_hours),
         "iss": "airlock-demo",
         "aud": "mcp-airlock"
     }

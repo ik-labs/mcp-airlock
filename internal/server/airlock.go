@@ -226,6 +226,8 @@ func (s *AirlockServer) Start(ctx context.Context) error {
 	// Health endpoints
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
+	mux.HandleFunc("/live", s.handleLiveness)
+	mux.HandleFunc("/info", s.handleInfo)
 
 	s.httpServer = &http.Server{
 		Addr:         s.config.Addr,
@@ -572,6 +574,26 @@ func (s *AirlockServer) handleReady(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+}
+
+// handleLiveness handles liveness probe requests (simple health check)
+func (s *AirlockServer) handleLiveness(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err := fmt.Fprintf(w, `{"status":"alive","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return
+	}
+}
+
+// handleInfo handles info requests (server version and build info)
+func (s *AirlockServer) handleInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err := fmt.Fprintf(w, `{"service":"mcp-airlock","version":"dev","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return
 	}
 }
 
