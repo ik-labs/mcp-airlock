@@ -1,0 +1,2 @@
+# Python dependencies for MCP Airlock demo
+PyJWT>=2.8.0

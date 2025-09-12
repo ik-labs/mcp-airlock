@@ -58,6 +58,7 @@ See [DEMO.md](DEMO.md) for detailed demo instructions and security test scenario
 
 - Go 1.22 or later
 - Python 3.x (for MCP servers)
+- PyJWT library (automatically installed by demo script)
 - Make (optional, for using Makefile)
 
 #### Installation

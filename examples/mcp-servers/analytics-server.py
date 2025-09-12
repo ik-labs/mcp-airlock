@@ -59,8 +59,8 @@ class AnalyticsServer:
         )
         self.logger = logging.getLogger(__name__)
         
-        # Start background data generation
-        asyncio.create_task(self._generate_sample_data())
+        # Sample data generation will be started when the server runs
+        self._sample_data_started = False
     
     def setup_database(self):
         """Initialize the analytics database"""
@@ -743,6 +743,11 @@ class AnalyticsServer:
         os.chmod(socket_path, 0o666)
         
         self.logger.info(f"Analytics server listening on {socket_path}")
+        
+        # Start sample data generation
+        if not self._sample_data_started:
+            asyncio.create_task(self._generate_sample_data())
+            self._sample_data_started = True
         
         try:
             while True:

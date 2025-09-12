@@ -15,7 +15,7 @@ auth:
   audience: "mcp-airlock"
   issuer: "airlock-demo"
   clock_skew: "5m"
-  required_groups: []  # Allow all groups for demo
+  required_groups: ["users"]  # Basic group requirement for demo
 
 # OPA Policy Engine with hot-reload
 policy:
@@ -28,12 +28,12 @@ roots:
   - name: "public-docs"
     type: "fs"
     virtual: "mcp://docs/"
-    real: "./examples/sample-docs/public"
+    real: "${PWD}/examples/sample-docs/public"
     read_only: true
   - name: "sensitive-docs"
     type: "fs" 
     virtual: "mcp://sensitive/"
-    real: "./examples/sample-docs/sensitive"
+    real: "${PWD}/examples/sample-docs/sensitive"
     read_only: true
   - name: "temp-storage"
     type: "fs"
@@ -92,7 +92,7 @@ upstreams:
 audit:
   backend: "sqlite"
   database: "/tmp/airlock-demo-audit.db"
-  retention: "7d"
+  retention: "168h"  # 7 days
   export_format: "jsonl"
   hash_chain: true  # Tamper-evident logging
   include_request_body: true

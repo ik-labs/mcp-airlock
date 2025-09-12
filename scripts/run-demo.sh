@@ -49,9 +49,33 @@ print_success "Prerequisites check passed"
 
 # Install Python dependencies
 print_step "Installing Python dependencies..."
-pip3 install PyJWT &> /dev/null || {
-    print_warning "Could not install PyJWT. Token generation may not work."
-}
+if ! python3 -c "import jwt" &> /dev/null; then
+    print_step "PyJWT not found, attempting to install..."
+    
+    # Try different installation methods
+    if pip3 install -r requirements.txt &> /dev/null; then
+        print_success "Dependencies installed from requirements.txt"
+    elif pip3 install --user -r requirements.txt &> /dev/null; then
+        print_success "Dependencies installed from requirements.txt (user mode)"
+    elif pip3 install --break-system-packages -r requirements.txt &> /dev/null; then
+        print_success "Dependencies installed from requirements.txt (system packages)"
+    elif pip3 install PyJWT &> /dev/null; then
+        print_success "PyJWT installed directly"
+    elif pip3 install --user PyJWT &> /dev/null; then
+        print_success "PyJWT installed directly (user mode)"
+    elif pip3 install --break-system-packages PyJWT &> /dev/null; then
+        print_success "PyJWT installed directly (system packages)"
+    else
+        print_error "Failed to install PyJWT. Please install manually:"
+        echo "  pip3 install -r requirements.txt"
+        echo "  or: pip3 install PyJWT"
+        echo "  or: pip3 install --user PyJWT"
+        echo "  or: pip3 install --break-system-packages PyJWT"
+        exit 1
+    fi
+else
+    print_success "PyJWT already installed"
+fi
 
 # Build Airlock
 print_step "Building MCP Airlock..."
@@ -77,10 +101,10 @@ pkill -f "docs-server.py" 2>/dev/null || true
 pkill -f "analytics-server.py" 2>/dev/null || true
 sleep 2
 
-# Start servers
-python3 examples/mcp-servers/docs-server.py &
+# Start servers with proper environment variables for macOS
+DOCS_ROOT="./examples/sample-docs" MCP_SOCKET_PATH="/tmp/docs.sock" python3 examples/mcp-servers/docs-server.py &
 DOCS_PID=$!
-python3 examples/mcp-servers/analytics-server.py &
+ANALYTICS_DB_PATH="/tmp/analytics.db" MCP_SOCKET_PATH="/tmp/analytics.sock" python3 examples/mcp-servers/analytics-server.py &
 ANALYTICS_PID=$!
 
 # Wait for servers to start
@@ -99,9 +123,125 @@ fi
 
 print_success "MCP servers started (PIDs: $DOCS_PID, $ANALYTICS_PID)"
 
+# Create config with current directory paths (portable for any user)
+print_step "Creating demo configuration with current directory paths..."
+CURRENT_DIR=$(pwd)
+cat > /tmp/config-demo-resolved.yaml << EOF
+# MCP Airlock Hackathon Demo Configuration (Auto-generated)
+# Showcases all security features with current directory paths
+
+server:
+  addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  timeouts:
+    read: "30s"
+    write: "30s"
+    idle: "120s"
+
+# JWT Authentication (demo mode)
+auth:
+  jwt_secret: "demo-secret-key-for-hackathon-only"  # DO NOT use in production
+  audience: "mcp-airlock"
+  issuer: "airlock-demo"
+  clock_skew: "5m"
+  required_groups: ["users"]  # Basic group requirement for demo
+
+# OPA Policy Engine with hot-reload
+policy:
+  rego_file: "${CURRENT_DIR}/configs/policy.rego"
+  cache_ttl: "10s"  # Fast reload for demo
+  reload_signal: "SIGHUP"
+
+# Virtual root mappings with security
+roots:
+  - name: "public-docs"
+    type: "fs"
+    virtual: "mcp://docs/"
+    real: "${CURRENT_DIR}/examples/sample-docs/public"
+    read_only: true
+  - name: "sensitive-docs"
+    type: "fs" 
+    virtual: "mcp://sensitive/"
+    real: "${CURRENT_DIR}/examples/sample-docs/sensitive"
+    read_only: true
+  - name: "temp-storage"
+    type: "fs"
+    virtual: "mcp://temp/"
+    real: "/tmp/airlock-demo"
+    read_only: false
+
+# Data Loss Prevention - showcases PII redaction
+dlp:
+  patterns:
+    - name: "email"
+      regex: '(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      replace: "[REDACTED-EMAIL]"
+    - name: "phone"
+      regex: '(?i)(\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}'
+      replace: "[REDACTED-PHONE]"
+    - name: "ssn"
+      regex: '(?i)\b\d{3}-?\d{2}-?\d{4}\b'
+      replace: "[REDACTED-SSN]"
+    - name: "credit_card"
+      regex: '(?i)\b(?:\d{4}[-\s]?){3}\d{4}\b'
+      replace: "[REDACTED-CC]"
+    - name: "bearer_token"
+      regex: '(?i)bearer\s+[a-z0-9._-]+'
+      replace: "[REDACTED-TOKEN]"
+    - name: "api_key"
+      regex: '(?i)(api[_-]?key|token|secret)["\s]*[:=]["\s]*[a-z0-9._-]+'
+      replace: "[REDACTED-API-KEY]"
+    - name: "aws_key"
+      regex: '(?i)(AKIA[0-9A-Z]{16})'
+      replace: "[REDACTED-AWS-KEY]"
+    - name: "password"
+      regex: '(?i)(password|pass)["\s]*[:=]["\s]*[^\s\n]+'
+      replace: "[REDACTED-PASSWORD]"
+
+# Role-based rate limiting
+rate_limiting:
+  per_token: "100/min"  # Default for demo
+  per_ip: "500/min"
+  burst: 20
+
+# MCP Server connections
+upstreams:
+  - name: "docs-server"
+    type: "unix"
+    socket: "/tmp/docs.sock"
+    timeout: "30s"
+    allow_tools: ["search_docs", "read_file", "list_directory"]
+  - name: "analytics-server"
+    type: "unix"
+    socket: "/tmp/analytics.sock"
+    timeout: "30s"
+    allow_tools: ["query_metrics", "generate_report", "export_data", "get_dashboard_data"]
+
+# Comprehensive audit logging with hash chaining
+audit:
+  backend: "sqlite"
+  database: "/tmp/airlock-demo-audit.db"
+  retention: "168h"  # 7 days
+  export_format: "jsonl"
+  hash_chain: true  # Tamper-evident logging
+  include_request_body: true
+  include_response_body: true
+
+# Full observability for demo
+observability:
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: false  # Keep simple for demo
+  logging:
+    level: "info"
+    format: "json"
+EOF
+
 # Start Airlock
 print_step "Starting MCP Airlock with demo configuration..."
-./airlock -config config-demo.yaml &
+./airlock --config /tmp/config-demo-resolved.yaml &
 AIRLOCK_PID=$!
 
 # Wait for Airlock to start
